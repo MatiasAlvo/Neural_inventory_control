@@ -1,0 +1,94 @@
+seeds : 
+  'underage_cost': 28 
+  'holding_cost': 73 
+  'mean': 33
+  'coef_of_var': 92 
+  'lead_time': 41 
+  'demand': 57 
+  'initial_inventory': 4839
+
+test_seeds :  # seeds for test set
+  'underage_cost': 36 
+  'holding_cost': 81 
+  'mean': 41 
+  'coef_of_var': 100
+  'lead_time': 49
+  'demand': 65
+  'initial_inventory': 4847
+
+sample_data_params:
+  'split_by_period': False
+
+problem_params : 
+  'n_stores': 1
+  'n_warehouses': 0
+  'n_extra_echelons': 0
+  'lost_demand': True
+  'maximize_profit': False
+
+params_by_dataset : 
+  'train': 
+    'n_samples': 32768 
+    'batch_size': 8192  # values tested: 1024, 8192
+    'periods': 50 
+    'ignore_periods': 30 
+  'dev': 
+    'n_samples': 32768 
+    'batch_size': 8192 
+    'periods': 50 
+    'ignore_periods': 30 
+  'test': 
+    'n_samples': 32768 
+    'batch_size': 8192 
+    'periods': 500 
+    'ignore_periods': 300
+
+observation_params:
+  'include_warehouse_inventory': False
+  'include_static_features':
+    'holding_costs': True 
+    'underage_costs': True 
+    'lead_times': True 
+    'upper_bounds': False
+  'demand': 
+    'past_periods': 0 
+    'period_shift': 0
+  'include_past_observations':
+    'arrivals': 0
+    'orders': 0
+  'include_days_to_christmas': False
+
+store_params: 
+  'demand': 
+    'sample_across_stores': False
+    'expand': True
+    'mean': 5.0
+    'distribution': 'poisson'
+    'clip': True
+    'decimals': 3
+  'lead_time': 
+    'sample_across_stores': False
+    'vary_across_samples': False
+    'expand': True
+    'value': 4  # values tested: 1, 2, 3, 4
+  'holding_cost': 
+    'sample_across_stores': False 
+    'vary_across_samples': False
+    'expand': True
+    'value': 1
+  'underage_cost': 
+    'sample_across_stores': False
+    'vary_across_samples': False 
+    'expand': True
+    'value': 9.0  # values tested: 4, 9, 19, 39
+  'initial_inventory': 
+    'sample': True
+    'range_mult': [0, 1]
+    'inventory_periods': 4
+
+warehouse_params: 
+  null
+
+echelon_params: 
+  null
+

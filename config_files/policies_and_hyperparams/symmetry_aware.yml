@@ -1,0 +1,33 @@
+trainer_params : 
+  'epochs': 1000 
+  'do_dev_every_n_epochs': 1
+  'print_results_every_n_epochs': 1
+  'save_model': False  # path to save is defined in main script
+  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
+  'choose_best_model_on': 'dev_loss'  # for early stopping, choose according to best performance on this dataset
+  'load_previous_model': False
+  'load_model_path': null
+
+optimizer_params: 
+  'learning_rate': 0.001
+
+nn_params: 
+  'name': 'symmetry_aware'
+  'inner_layer_activations': 
+    'context': 'elu'
+    'store': 'elu'
+    'warehouse': 'elu'
+  'output_layer_activation':
+    'context': 'sigmoid'
+    'store': 'softplus'
+    'warehouse': 'sigmoid'
+  'neurons_per_hidden_layer':
+    'context': [256]
+    'store': [32, 32]
+    'warehouse': [16, 16]
+  'output_sizes':
+    'context': 256
+    'store': 1
+    'warehouse': 1
+  'initial_bias': null
+  'warehouse_upper_bound_mult': 4

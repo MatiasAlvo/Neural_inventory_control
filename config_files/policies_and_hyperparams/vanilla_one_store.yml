@@ -1,0 +1,26 @@
+trainer_params : 
+  'epochs': 200
+  'do_dev_every_n_epochs': 1 
+  'print_results_every_n_epochs': 1
+  'save_model': False
+  'load_previous_model': False
+  'load_model_path': 'Code_to_submit/models_saved/test.pt'
+  'choose_best_model_on': 'dev_loss'
+  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
+
+optimizer_params:
+  'learning_rate': 0.01  # for lost demand setting, used, 0.0001, 0.001, 0.01
+
+nn_params: 
+  'name': 'vanilla_one_store'
+  'neurons_per_hidden_layer': 
+    'master': [32, 32, 32]  # for lost demand setting, tested with 2 and 3 hidden layers
+  'inner_layer_activations': 
+    'master': 'elu'
+  # we will add 1 to the output and apply a softplus within the forward method of the NN!
+  'output_layer_activation':
+    'master': null
+  'initial_bias':
+    null
+  'output_sizes':
+    'master': 1

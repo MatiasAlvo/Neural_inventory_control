@@ -1,0 +1,99 @@
+seeds : 
+  'underage_cost': 28 
+  'holding_cost': 73 
+  'mean': 33
+  'coef_of_var': 92 
+  'lead_time': 41 
+  'demand': 57 
+  'initial_inventory': 4839
+
+test_seeds :  # seeds for test set
+  'underage_cost': 36 
+  'holding_cost': 81 
+  'mean': 41 
+  'coef_of_var': 100
+  'lead_time': 49
+  'demand': 65
+  'initial_inventory': 4839
+
+sample_data_params:
+  'split_by_period': True
+  'train_periods': (0, 120)
+  'dev_periods': (104, 170)
+  'test_periods': (154, 200)
+
+problem_params : 
+  'n_stores': 1
+  'n_warehouses': 0
+  'n_extra_echelons': 0
+  'lost_demand': True
+  'maximize_profit': True
+
+params_by_dataset : 
+  'train': 
+    'n_samples': 32768 
+    'batch_size': 8192 
+    'periods': 104 
+    'ignore_periods': 16
+  'dev': 
+    'n_samples': 32768 
+    'batch_size': 8192 
+    'periods': 50 
+    'ignore_periods': 16 
+  'test': 
+    'n_samples': 32768 
+    'batch_size': 8192 
+    'periods': 30 
+    'ignore_periods': 10
+
+observation_params:
+  'include_warehouse_inventory': False
+  'include_static_features':
+    'holding_costs': True 
+    'underage_costs': True 
+    'lead_times': True 
+    'upper_bounds': False
+  'demand': 
+    'past_periods': 16 
+    'period_shift': 16
+  'include_past_observations':
+    'arrivals': 8
+    'orders': 8
+  'time_features_file': 'Code_to_submit/data_files/favorita/dates_with_info.csv'
+  'time_features':
+    ['days_from_christmas']
+
+store_params: 
+  'demand': 
+    'distribution': 'real'
+    'file_location': 'Code_to_submit/data_files/favorita/weekly_sales.pt'
+    'sample_across_stores': False
+    'expand': False
+    'clip': False
+    'decimals': 3
+  'lead_time': 
+    'sample_across_stores': False
+    'vary_across_samples': True
+    'expand': False
+    'range': [4, 7]  # higher end is excluded from sampling!
+  'holding_cost': 
+    'sample_across_stores': False 
+    'vary_across_samples': False
+    'expand': True
+    'value': 1.0
+  'underage_cost': 
+    'sample_across_stores': False
+    'vary_across_samples': True 
+    'expand': False
+    'range': [6.3, 11.7]
+  'initial_inventory': 
+    'sample': False
+    'inventory_periods': 6
+
+warehouse_params: 
+  'holding_cost': 0.3
+  'lead_time': 4     
+
+echelon_params: 
+  None
+

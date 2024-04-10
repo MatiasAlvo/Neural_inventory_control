@@ -1,0 +1,25 @@
+trainer_params : 
+  'epochs': 800 
+  'do_dev_every_n_epochs': 5 
+  'print_results_every_n_epochs': 5
+  'save_model': False
+  'load_previous_model': False
+  'load_model_path': null
+  'choose_best_model_on': 'dev_loss'
+  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
+
+optimizer_params: 
+  'learning_rate': 0.0001
+
+nn_params: 
+  'name': 'vanilla_transshipment'
+  'inner_layer_activations': 
+    'master': 'elu'
+  'output_layer_activation':
+    'master': null
+  'neurons_per_hidden_layer':
+    'master': [256, 256, 256]
+  'output_sizes':
+    'master': null # if null, default is n_warehouse + n_stores (set in NeuralNetworkCreator)
+  'initial_bias': null
+  'warehouse_upper_bound_mult': 4
