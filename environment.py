@@ -432,8 +432,6 @@ class Simulator(gym.Env):
         """
         
         if end_index is None:
-            print(f'tensor_to_displace.shape: {tensor_to_displace.shape}')
-            print(f'dim: {dim}')
             end_index = tensor_to_displace.shape[dim] - 1
         
         return torch.stack([*self.move_columns_left(tensor_to_displace, start_index, end_index), tensor_to_append],
