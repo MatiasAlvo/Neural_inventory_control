@@ -19,13 +19,13 @@ class FullyConnectedForecaster(nn.Module):
                 list of quantiles for predicting the cumulative demand over the lead times
         """
 
-        super().__init__() # initialize super class
-        self.qs = qs.round(2)  # list of quantiles
-        self.qs_dict = {round(q, 2): i for i, q in enumerate(qs)} # dictionary of quantiles and their indices
+        super().__init__() # Initialize super class
+        self.qs = qs.round(2)  # List of quantiles
+        self.qs_dict = {round(q, 2): i for i, q in enumerate(qs)} # Dictionary of quantiles and their indices
         lead_times = torch.tensor(lead_times).int()
-        self.lead_times = lead_times # list of lead times
+        self.lead_times = lead_times # List of lead times
         self.min_lead_time = min(lead_times)
-        self.lead_times_dict = {lead_time: i for i, lead_time in enumerate(lead_times)} # dictionary of lead times and their indices
+        self.lead_times_dict = {lead_time: i for i, lead_time in enumerate(lead_times)} # Dictionary of lead times and their indices
 
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

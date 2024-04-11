@@ -59,9 +59,9 @@ class Trainer():
             and the metric to use for choosing the best model
         """
 
-        for epoch in range(epochs): # make multiple passes through the dataset
+        for epoch in range(epochs): # Make multiple passes through the dataset
             
-            # do one epoch of training, including updating the model parameters
+            # Do one epoch of training, including updating the model parameters
             average_train_loss, average_train_loss_to_report = self.do_one_epoch(
                 optimizer, 
                 data_loaders['train'], 
@@ -104,7 +104,6 @@ class Trainer():
 
             # Print epoch number and average per-period loss every 10 epochs
             if epoch % trainer_params['print_results_every_n_epochs'] == 0:
-                print()
                 print(f'epoch: {epoch + 1}')
                 print(f'Average per-period train loss: {average_train_loss_to_report}')
                 print(f'Average per-period dev loss: {average_dev_loss_to_report}')
@@ -140,9 +139,9 @@ class Trainer():
         epoch_loss = 0
         epoch_loss_to_report = 0  # Loss ignoring the first 'ignore_periods' periods
         total_samples = len(data_loader.dataset)
-        periods_tracking_loss = periods - ignore_periods  # number of periods for which we report the loss
+        periods_tracking_loss = periods - ignore_periods  # Number of periods for which we report the loss
 
-        for i, data_batch in enumerate(data_loader):  # loop through batches of data
+        for i, data_batch in enumerate(data_loader):  # Loop through batches of data
             data_batch = self.move_batch_to_device(data_batch)
             
             if train:
@@ -153,8 +152,8 @@ class Trainer():
             total_reward, reward_to_report = self.simulate_batch(
                 loss_function, simulator, model, periods, problem_params, data_batch, observation_params, ignore_periods, discrete_allocation
                 )
-            epoch_loss += total_reward.item()  # rewards from period 0
-            epoch_loss_to_report += reward_to_report.item()  # rewards from period ignore_periods onwards
+            epoch_loss += total_reward.item()  # Rewards from period 0
+            epoch_loss_to_report += reward_to_report.item()  # Rewards from period ignore_periods onwards
             
             mean_loss = total_reward/(len(data_batch['demands'])*periods*problem_params['n_stores'])
             
@@ -207,7 +206,6 @@ class Trainer():
         path = self.create_many_folders_if_not_exist_and_return_path(base_dir=trainer_params['base_dir'], 
                                                                      intermediate_folder_strings=trainer_params['save_model_folders']
                                                                      )
-        print(f'Saving in directory: {path}')
         torch.save({
                     'epoch': epoch,
                     'model_state_dict': self.best_performance_data['model_params_to_save'],

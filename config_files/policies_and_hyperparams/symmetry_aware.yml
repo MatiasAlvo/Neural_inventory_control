@@ -1,10 +1,10 @@
 trainer_params : 
   'epochs': 1000 
-  'do_dev_every_n_epochs': 1
-  'print_results_every_n_epochs': 1
-  'save_model': False  # path to save is defined in main script
-  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
-  'choose_best_model_on': 'dev_loss'  # for early stopping, choose according to best performance on this dataset
+  'do_dev_every_n_epochs': 5
+  'print_results_every_n_epochs': 5
+  'save_model': False  # Path to save is defined in main script
+  'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
+  'choose_best_model_on': 'dev_loss'  # For early stopping, choose according to best performance on this dataset
   'load_previous_model': False
   'load_model_path': null
 

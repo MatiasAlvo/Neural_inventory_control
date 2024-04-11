@@ -110,8 +110,8 @@ class MyNeuralNetwork(nn.Module):
         warehouse is not sufficient.
         """
 
-        total_limiting_inventory = warehouse_inventories[:, :, 0].sum(dim=1)  # total inventory at the warehouse
-        sum_allocation = store_intermediate_outputs.sum(dim=1)  # sum of all store order quantities
+        total_limiting_inventory = warehouse_inventories[:, :, 0].sum(dim=1)  # Total inventory at the warehouse
+        sum_allocation = store_intermediate_outputs.sum(dim=1)  # Sum of all store order quantities
 
         # Multiply current allocation by minimum between inventory/orders and 1
         final_allocation = \
@@ -207,8 +207,8 @@ class BaseStock(MyNeuralNetwork):
         """
         x = observation['store_inventories']
         inv_pos = x.sum(dim=2)
-        x = self.net['master'](torch.tensor([0.0]).to(self.device))  # constant base stock level
-        return {'stores': torch.clip(x - inv_pos, min=0)} # clip output to be non-negative
+        x = self.net['master'](torch.tensor([0.0]).to(self.device))  # Constant base stock level
+        return {'stores': torch.clip(x - inv_pos, min=0)} # Clip output to be non-negative
 
 class CappedBaseStock(MyNeuralNetwork):
     """"
@@ -222,10 +222,10 @@ class CappedBaseStock(MyNeuralNetwork):
         """
         x = observation['store_inventories']
         inv_pos = x.sum(dim=2)
-        x = self.net['master'](torch.tensor([0.0]).to(self.device))  # constant base stock level
-        base_level, cap = x[0], x[1]  # we interpret first input as base level, and second output as cap on the order
+        x = self.net['master'](torch.tensor([0.0]).to(self.device))  # Constant base stock level
+        base_level, cap = x[0], x[1]  # We interpret first input as base level, and second output as cap on the order
         
-        return {'stores': torch.clip(base_level - inv_pos, min=torch.tensor([0.0]).to(self.device), max=cap)} # clip output to be non-negative
+        return {'stores': torch.clip(base_level - inv_pos, min=torch.tensor([0.0]).to(self.device), max=cap)} # Clip output to be non-negative
 
 
 class VanillaOneWarehouse(MyNeuralNetwork):
@@ -337,7 +337,7 @@ class DataDrivenNet(MyNeuralNetwork):
                 ]
             )
 
-        return {'stores': self.net['master'](input_tensor)} # clip output to be non-negative
+        return {'stores': self.net['master'](input_tensor)} # Clip output to be non-negative
 
 class QuantilePolicy(MyNeuralNetwork):
     """
@@ -348,9 +348,9 @@ class QuantilePolicy(MyNeuralNetwork):
 
     def __init__(self, args, device='cpu'):
 
-        super().__init__(args=args, device=device) # initialize super class
+        super().__init__(args=args, device=device) # Initialize super class
         self.fixed_nets = {'quantile_forecaster': self.load_forecaster(args, requires_grad=False)}
-        self.allow_back_orders = False  # we will set to True only for non-admissible ReturnsNV policy
+        self.allow_back_orders = False  # We will set to True only for non-admissible ReturnsNV policy
         
     def load_forecaster(self, nn_params, requires_grad=True):
         """"
@@ -423,7 +423,7 @@ class QuantileNV(QuantilePolicy):
 
     def __init__(self, args, device='cpu'):
 
-        super().__init__(args=args, device=device) # initialize super class
+        super().__init__(args=args, device=device) # Initialize super class
         self.trainable = False
 
     def compute_desired_quantiles(self, args):
@@ -440,7 +440,7 @@ class ReturnsNV(QuantileNV):
 
     def __init__(self, args, device='cpu'):
 
-        super().__init__(args=args, device=device) # initialize super class
+        super().__init__(args=args, device=device) # Initialize super class
         self.trainable = False
         self.allow_back_orders = True
 
@@ -461,7 +461,7 @@ class JustInTime(MyNeuralNetwork):
     """
 
     def __init__(self, args, device='cpu'):
-        super().__init__(args=args, device=device) # initialize super class
+        super().__init__(args=args, device=device) # Initialize super class
         self.trainable = False
 
     def forward(self, observation):
@@ -475,7 +475,7 @@ class JustInTime(MyNeuralNetwork):
     
         num_samples, num_stores, max_lead_time = demands.shape
 
-        # For every sample and store, get the demand 'lead_times' periods from now
+        # For every sample and store, get the demand 'lead_times' periods from now.
         # Does not currently work for backlogged demand setting!
         future_demands = torch.stack([
             demands[:, j][

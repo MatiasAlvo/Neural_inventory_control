@@ -20,37 +20,27 @@ class Scenario():
         self.lead_times = self.generate_data_for_samples_and_stores(problem_params, store_params['lead_time'], seeds['lead_time'], discrete=True).to(torch.int64)
         self.means, self.stds = self.generate_means_and_stds(observation_params, store_params)
         self.initial_inventories = self.generate_initial_inventories(problem_params, store_params, self.demands, self.lead_times, seeds['initial_inventory'])
-
-        # print(f'self.underage_costs: {self.underage_costs}')
-        # print(f'self.holding_costs: {self.holding_costs}')
-        # print(f'self.lead_times: {self.lead_times}')
-        # print(f'self.means: {self.means}')
-        # print(f'self.stds: {self.stds}')
-        # print(f'self.initial_inventories: {self.initial_inventories}')
         
         self.initial_warehouse_inventories = self.generate_initial_warehouse_inventory(warehouse_params)
         self.warehouse_lead_times = self.generate_warehouse_data(warehouse_params, 'lead_time')
         self.warehouse_holding_costs = self.generate_warehouse_data(warehouse_params, 'holding_cost')
 
         time_and_sample_features = {'time_features': {}, 'sample_features': {}}
-        # self.time_features = {}
 
         for feature_type, feature_file in zip(['time_features', 'sample_features'], ['time_features_file', 'sample_features_file']):
             if observation_params[feature_type] and observation_params[feature_file]:
-            # if observation_params['time_features'] and observation_params['time_features_file']:
                 features = pd.read_csv(observation_params[feature_file])
                 for k in observation_params[feature_type]:
                     tensor_to_append = torch.tensor(features[k].values)
                     if feature_type == 'time_features':
                         time_and_sample_features[feature_type][k] = tensor_to_append.unsqueeze(0).unsqueeze(0).expand(self.num_samples, self.problem_params['n_stores'], -1)
-                    elif feature_type == 'sample_features':  # currently only supports the one store case
+                    elif feature_type == 'sample_features':  # Currently only supports the one store case
                         time_and_sample_features[feature_type][k] = tensor_to_append.unsqueeze(1).expand(-1, self.problem_params['n_stores'])
-                    # self.time_features[k] = torch.tensor(time_features[k].values).unsqueeze(0).unsqueeze(0).expand(self.num_samples, self.problem_params['n_stores'], -1)
             
         self.time_features = time_and_sample_features['time_features']
         self.sample_features = time_and_sample_features['sample_features']
 
-        # creates a dictionary specifying which data has to be split by sample index and which by period (when dividing into train, dev, test sets)
+        # Creates a dictionary specifying which data has to be split by sample index and which by period (when dividing into train, dev, test sets)
         self.split_by = self.define_how_to_split_data()
 
     def get_data(self):
@@ -106,9 +96,6 @@ class Scenario():
 
         for k in self.sample_features.keys():
             split_by['sample_index'].append(k)
-            # split_by['period'].append('days_from_christmas')
-
-        # print(f'self.get_data(): {self.get_data().keys()}')
         
         return split_by
     
@@ -117,7 +104,7 @@ class Scenario():
         Generate demand data
         """
                 
-        # sample parameters to generate demand if necessary (otherwise, does nothing)
+        # Sample parameters to generate demand if necessary (otherwise, does nothing)
         self.generate_demand_parameters(problem_params, demand_params, seeds)
 
         demand_generator_functions = {
@@ -125,17 +112,14 @@ class Scenario():
             'poisson': self.generate_poisson_demand,
             'real': self.read_real_demand_data,
             }
-        # print(f'demand_params: {demand_params}')
 
-        # changing demand seed for consistency with results prensented in the manuscript
+        # Changing demand seed for consistency with results prensented in the manuscript
         self.adjust_seeds_for_consistency(problem_params, store_params, seeds)
 
-        # sample demand
+        # Sample demand traces
         demand = demand_generator_functions[demand_params['distribution']](problem_params, demand_params, seeds['demand'])
-        # print(f'demand: {demand[0]}')
-        # print(f'demand: {demand.shape}')
 
-        if demand_params['clip']:  # truncate at 0 from below if specified
+        if demand_params['clip']:  # Truncate at 0 from below if specified
             demand = np.clip(demand, 0, None)
         
         return torch.tensor(demand)
@@ -144,7 +128,7 @@ class Scenario():
 
         if problem_params['n_warehouses'] == 0 and problem_params['n_stores'] == 1 and store_params['demand']['distribution'] != 'real':
             try:
-                # changing demand seed for consistency with results prensented in the manuscript
+                # Changing demand seed for consistency with results prensented in the manuscript
                 seeds['demand'] = seeds['demand'] + int(store_params['lead_time']['value'] + 10*store_params['underage_cost']['value'])
             except Exception as e:
                 print(f'Error: {e}')
@@ -170,7 +154,7 @@ class Scenario():
         Generate normal demand data
         """
 
-        # set seed
+        # Set seed
         if seed is not None:
             np.random.seed(seed)
         
@@ -180,7 +164,7 @@ class Scenario():
                                       size=(self.num_samples, 1, self.periods)
                                       )
         else:
-            # calculate covariance matrix and sample from multivariate normal
+            # Calculate covariance matrix and sample from multivariate normal
             correlation = demand_params['correlation']
             cov_matrix = [[correlation*v1*v2 if i!= j else v1*v2 
                            for i, v1 in enumerate(demand_params['std'])
@@ -194,7 +178,7 @@ class Scenario():
 
     def generate_poisson_demand(self, problem_params, demand_params, seed):
 
-        # set seed
+        # Set seed
         if seed is not None:
             np.random.seed(seed)
         
@@ -217,14 +201,12 @@ class Scenario():
         Sample mean and std for normal demand
         """
 
-        # set seed
+        # Set seed
         np.random.seed(seeds['mean'])
 
         means = np.random.uniform(demand_params['mean_range'][0], demand_params['mean_range'][1], problem_params['n_stores']).round(3)
-        # del demand_params['mean_range']
         np.random.seed(seeds['coef_of_var'])
         coef_of_var = np.random.uniform(demand_params['coef_of_var_range'][0], demand_params['coef_of_var_range'][1], problem_params['n_stores'])
-        # del demand_params['coef_of_var_range']
         stds = (means * coef_of_var).round(3)
         return {'mean': means, 'std': stds}
     
@@ -235,12 +217,11 @@ class Scenario():
         
         np.random.seed(seed)
 
-        # we first create a default dict from the params dictionary, so that we return False by default
+        # We first create a default dict from the params dictionary, so that we return False by default
         # whenever we query a key that was not set by the user
         params_copy = DefaultDict(lambda: False, copy.deepcopy(cost_params))
 
         sample_functions = {False: np.random.uniform, True: np.random.randint}
-        # sample uniformly from the range (discrete)
         this_sample_function = sample_functions[discrete]
         
 
@@ -251,28 +232,18 @@ class Scenario():
         elif params_copy['vary_across_samples']:
             return torch.tensor(this_sample_function(*params_copy['range'], self.num_samples)).unsqueeze(1).expand(-1, problem_params['n_stores'])
         elif params_copy['expand']:
-            # this_n_stores = 3
-            # expanded = torch.tensor(params_copy['value']).expand(self.num_samples, this_n_stores)
-            # print(f"expand: {expanded[3]}")
-            # assert False
-            # print(f'value: {params_copy["value"]}')
             return torch.tensor(params_copy['value']).expand(self.num_samples, problem_params['n_stores'])
         else:
-            # print(f'value: {params_copy["value"]}')
-            # assert False
             return torch.tensor(params_copy['value'])
     
     def generate_initial_inventories(self, problem_params, store_params, demands, lead_times, seed):
         """
         Generate initial inventory data
         """
-        # set seed
+        # Set seed
         np.random.seed(seed)
 
         if store_params['initial_inventory']['sample']:
-            # change type of demands to float
-
-            # demand_mean = demands.float().mean(dim=0)
             demand_mean = demands.float().mean(dim=2).mean(dim=0)
             demand_mults = np.random.uniform(*store_params['initial_inventory']['range_mult'], 
                                              size=(self.num_samples, 
@@ -322,9 +293,7 @@ class Scenario():
         for k in ['mean', 'std']:
             if k in observation_params['include_static_features'] and observation_params['include_static_features'][k]:
                 to_return[k] = torch.tensor(store_params['demand'][k]).unsqueeze(0).expand(self.num_samples, -1)
-                # to_return[k] = store_params['demand'][k]
         return to_return['mean'], to_return['std']
-        # return torch.tensor(to_return['mean']).unsqueeze(0).expand(self.num_samples, -1), torch.tensor(to_return['std']).unsqueeze(0).expand(self.num_samples, -1)
 
 class MyDataset(Dataset):
 
@@ -350,7 +319,6 @@ class DatasetCreator():
         if split:
             if by_period:
                 return [self.create_single_dataset(data) for data in self.split_by_period(scenario, periods_for_split)]
-                # train_data, dev_data = self.split_by_period(scenario, period_for_split)
             elif by_sample_indexes:
                 train_data, dev_data = self.split_by_sample_index(scenario, sample_index_for_split)
             else:
@@ -381,7 +349,7 @@ class DatasetCreator():
 
         for period_range in periods_for_split:
             this_data = copy.deepcopy(common_data)
-            # change period_range to slice object (it is a string)
+            # Change period_range to slice object (it is currently of type string)
             period_range = slice(*map(int, period_range.strip('() ').split(',')))
 
             for k in scenario.split_by['period']:

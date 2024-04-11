@@ -6,7 +6,7 @@ trainer_params :
   'load_previous_model': False
   'load_model_path': null
   'choose_best_model_on': 'dev_loss'
-  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
+  'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
 
 optimizer_params: 
   'learning_rate': 0.0001
@@ -20,6 +20,6 @@ nn_params:
   'neurons_per_hidden_layer':
     'master': [256, 256, 256]
   'output_sizes':
-    'master': null # if null, default is n_warehouse + n_stores (set in NeuralNetworkCreator)
+    'master': null # If null, default is n_warehouse + n_stores (set in NeuralNetworkCreator)
   'initial_bias': null
-  'warehouse_upper_bound_mult': 4
+  'warehouse_upper_bound_mult': 4  # Get warehouse upper bound by multiplying this number times average of sum of demands across stores

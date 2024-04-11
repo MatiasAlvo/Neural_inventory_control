@@ -1,12 +1,12 @@
 trainer_params : 
-  'epochs': 1000 
+  'epochs': 200 
   'do_dev_every_n_epochs': 5 
   'print_results_every_n_epochs': 10
   'save_model': False
   'load_previous_model': False
   'load_model_path': 'Code_to_submit/models_saved/test.pt'
   'choose_best_model_on': 'dev_loss'
-  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
+  'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
 
 optimizer_params: 
   'learning_rate': 1.0
@@ -22,4 +22,4 @@ nn_params:
   'neurons_per_hidden_layer':
     'master': []
   'output_sizes':
-    'master': 2  # first output is the base-stock-level, the second is the cap on the order
+    'master': 2  # First output is the base-stock-level, the second is the cap on the order

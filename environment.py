@@ -17,7 +17,7 @@ class Simulator(gym.Env):
         self.problem_params, self.observation_params, self.maximize_profit = None, None, None
         self.batch_size, self.n_stores, self.periods, self.observation, self._internal_data = None, None, None, None, None
 
-        # Place_holders, will be overrided in reset method (as observation and action spaces depend on batch size, which might change during execution)
+        # Place holders. Will be overrided in reset method (as observation and action spaces depend on batch size, which might change during execution)
         self.action_space = spaces.Dict({'stores': spaces.Box(low=0.0, high=np.inf, shape=(1, 1), dtype=np.float32)})
         self.observation_space = spaces.Dict({'stores': spaces.Box(low=0.0, high=np.inf, shape=(1, 1), dtype=np.float32)})
     
@@ -92,8 +92,8 @@ class Simulator(gym.Env):
             ).expand(batch_size, n_stores).to(self.device)
         
         # Results in a vector of shape batch_size x stores, where each entry corresponds to the first position of an element of a given (sample, store)
-        # in the long vector of the entire batch
-        # we then add the corresponding lead time to obtain the actual position in which to insert the action
+        # in the long vector of the entire batch.
+        # We then add the corresponding lead time to obtain the actual position in which to insert the action
         return n_instance_store_shift[:, None] + store_n_shift
 
     def initialize_zero_allocation_tensor(self, shape):
@@ -119,8 +119,8 @@ class Simulator(gym.Env):
             current_period=self.observation['current_period'].item()
             )
         
-        # Update observation corresponding to past occurrences (e.g., arrivals, orders, demands)
-        # do this before updating current period (as we consider current period + 1)
+        # Update observation corresponding to past occurrences (e.g., arrivals, orders, demands).
+        # Do this before updating current period (as we consider current period + 1)
         self.update_past_data(action)
 
         # Update time related features (e.g., days to christmas)
@@ -191,26 +191,27 @@ class Simulator(gym.Env):
         if self.problem_params['lost_demand']:
             post_inventory_on_hand = torch.clip(post_inventory_on_hand, min=0)
 
-        # # Update store inventories based on the lead time corresponding to each sample and store
-        # # If all lead times are the same, we can simplify this step by just adding the allocation to the last
-        # # column of the inventory tensor and moving all columns "to the left"
-        # # We leave this method as it is more general!
-        # observation['store_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
-        #     store_inventory, 
-        #     post_inventory_on_hand, 
-        #     action['stores'], 
-        #     observation['lead_times'], 
-        #     self._internal_data['allocation_shift']
-        #     )
-        
-        # Uncomment the following line to simplify the update of store inventories
-        # Only works when all lead times are the same, and the lead time is larger than 1
-        observation['store_inventories'] = self.move_left_add_first_col_and_append(
+        # Update store inventories based on the lead time corresponding to each sample and store.
+        # If all lead times are the same, we can simplify this step by just adding the allocation to the last
+        # column of the inventory tensor and moving all columns "to the left".
+        # We leave this method as it is more general!
+        observation['store_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
+            store_inventory, 
             post_inventory_on_hand, 
-            observation["store_inventories"], 
-            int(observation["lead_times"][0, 0]), 
-            action["stores"]
+            action['stores'], 
+            observation['lead_times'], 
+            self._internal_data['allocation_shift']
             )
+        
+        # # Uncomment the following line to simplify the update of store inventories.
+        # # Only works when all lead times are the same, and the lead time is larger than 1.
+        # # Only tested for one-store setting.
+        # observation['store_inventories'] = self.move_left_add_first_col_and_append(
+        #     post_inventory_on_hand, 
+        #     observation["store_inventories"], 
+        #     int(observation["lead_times"][0, 0]), 
+        #     action["stores"]
+        #     )
         
         return reward.sum(dim=1)
     
@@ -340,8 +341,8 @@ class Simulator(gym.Env):
             ], 
                 dim=2
                 ).put(
-                    (allocation_shifter + lead_times.long() - 1).flatten(),  # indexes where to 'put' allocation in long vector
-                    allocation.flatten(),  # values to 'put' in long vector
+                    (allocation_shifter + lead_times.long() - 1).flatten(),  # Indexes where to 'put' allocation in long vector
+                    allocation.flatten(),  # Values to 'put' in long vector
                     accumulate=True  # True means adding to existing values, instead of replacing
                     )
 

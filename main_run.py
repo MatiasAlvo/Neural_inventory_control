@@ -1,33 +1,37 @@
 import yaml
-import os
 import pandas as pd
 from trainer import *
 
-# Load the configuration files
-# config_setting_file = 'Code_to_submit/config_files/settings/one_store_backlogged.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/vanilla_one_store.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/base_stock.yml'
+# Uncomment one config_setting_file and one config_hyperparams_file
 
-config_setting_file = 'Code_to_submit/config_files/settings/one_store_lost.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/capped_base_stock.yml'
-config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/vanilla_one_store.yml'
+# One store backlogged demand setting
+# config_setting_file = 'config_files/settings/one_store_backlogged.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/base_stock.yml'
 
-# config_setting_file = 'Code_to_submit/config_files/settings/transshipment_backlogged.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/vanilla_transshipment.yml'
+# One store lost demand setting
+config_setting_file = 'config_files/settings/one_store_lost.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/capped_base_stock.yml'
+config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
 
-# config_setting_file = 'Code_to_submit/config_files/settings/one_warehouse_lost_demand.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/symmetry_aware.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/vanilla_transshipment.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/vanilla_one_warehouse.yml'
+# Transshipment center backlogged demand setting
+# config_setting_file = 'config_files/settings/transshipment_backlogged.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_transshipment.yml'
 
-# config_setting_file = 'Code_to_submit/config_files/settings/one_store_real_data_lost_demand.yml'
-# config_setting_file = 'Code_to_submit/config_files/settings/one_store_real_data_read_file_example.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/just_in_time.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/returns_nv.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/quantile_nv.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/fixed_quantile.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/transformed_nv.yml'
-# config_hyperparams_file = 'Code_to_submit/config_files/policies_and_hyperparams/data_driven_net.yml'
+# One warehouse lost demand setting
+# config_setting_file = 'config_files/settings/one_warehouse_lost_demand.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/symmetry_aware.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_warehouse.yml'
+
+# One store lost demand with realistic demand data setting
+# config_setting_file = 'config_files/settings/one_store_real_data_lost_demand.yml'
+# config_setting_file = 'config_files/settings/one_store_real_data_read_file_example.yml'  # example of how to read all data from files
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/just_in_time.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/returns_nv.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/quantile_nv.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/fixed_quantile.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/transformed_nv.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/data_driven_net.yml'
 
 with open(config_setting_file, 'r') as file:
     config_setting = yaml.safe_load(file)
@@ -37,19 +41,19 @@ with open(config_hyperparams_file, 'r') as file:
 
 setting_keys = 'seeds', 'test_seeds', 'problem_params', 'params_by_dataset', 'observation_params', 'store_params', 'warehouse_params', 'sample_data_params'
 hyperparams_keys = 'trainer_params', 'optimizer_params', 'nn_params'
-seeds, test_seeds, problem_params, params_by_dataset, observation_params, store_params, warehouse_params, sample_data_params = [config_setting[key] for key in setting_keys]
+seeds, test_seeds, problem_params, params_by_dataset, observation_params, store_params, warehouse_params, sample_data_params = [
+    config_setting[key] for key in setting_keys
+    ]
+
 trainer_params, optimizer_params, nn_params = [config_hyperparams[key] for key in hyperparams_keys]
 observation_params = DefaultDict(lambda: None, observation_params)
-
-# create a tensor of random numbers, of size samples x n_stores
-# tensor = torch.randint(0, 10, (params_by_dataset['train']['n_samples'] + params_by_dataset['dev']['n_samples'], 3)).float()
-# torch.save(tensor, 'Code_to_submit/data_files/underage_cost_3_stores.pt')
-# tensor = torch.load('Code_to_submit/data_files/underage_cost_3_stores.pt')
-# print(tensor)
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 dataset_creator = DatasetCreator()
 
+# For realistic data, train, dev and test sets correspond to the same products, but over disjoint periods.
+# We will therefore create one scenario, and then split the data into train, dev and test sets by 
+# "copying" all non-period related information, and then splitting the period related information
 if sample_data_params['split_by_period']:
     
     scenario = Scenario(
@@ -68,6 +72,11 @@ if sample_data_params['split_by_period']:
         by_period=True, 
         periods_for_split=[sample_data_params[k] for  k in ['train_periods', 'dev_periods', 'test_periods']],)
 
+# For synthetic data, we will first create a scenario that we will divide into train and dev sets by sample index.
+# Then, we will create a separate scenario for the test set, which will be exaclty the same as the previous scenario, 
+# but with different seeds to generate demand traces, and with a longer time horizon.
+# One can use this method of generating scenarios to train a model using some specific problem primitives, 
+# and then test it on a different set of problem primitives, by simply creating a new scenario with the desired primitives.
 else:
     scenario = Scenario(
         periods=params_by_dataset['train']['periods'], 
@@ -96,12 +105,6 @@ else:
 train_loader = DataLoader(train_dataset, batch_size=params_by_dataset['train']['batch_size'], shuffle=True)
 dev_loader = DataLoader(dev_dataset, batch_size=params_by_dataset['dev']['batch_size'], shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=params_by_dataset['test']['batch_size'], shuffle=False)
-
-# print(f'scenario.demand: {scenario.demands[0]}')
-# print(f"train_dataset[0]['days_from_christmas']: {train_dataset[0]['days_from_christmas']}")
-# print(f"dev_dataset[0]['days_from_christmas']: {dev_dataset[0]['days_from_christmas']}")
-# print(f"test_dataset[0]['days_from_christmas']: {test_dataset[0]['days_from_christmas']}")
-
 data_loaders = {'train': train_loader, 'dev': dev_loader, 'test': test_loader}
 
 neural_net_creator = NeuralNetworkCreator
@@ -113,11 +116,12 @@ optimizer = torch.optim.Adam(model.parameters(), lr=optimizer_params['learning_r
 simulator = Simulator(device=device)
 trainer = Trainer(device=device)
 
-# we will create a folder for each day of the year, and a subfolder for each model
-# when executing with different problem primitives (i.e. instance), it might be useful to create an additional subfolder for each instance
-trainer_params['base_dir'] = 'Code_to_submit/saved_models'
+# We will create a folder for each day of the year, and a subfolder for each model
+# When executing with different problem primitives (i.e. instance), it might be useful to create an additional subfolder for each instance
+trainer_params['base_dir'] = 'saved_models'
 trainer_params['save_model_folders'] = [trainer.get_year_month_day(), nn_params['name']]
-# we will simply name the model with the current time stamp
+
+# We will simply name the model with the current time stamp
 trainer_params['save_model_filename'] = trainer.get_time_stamp()
 
 # Load previous model if load_model is set to True in the config file
@@ -127,7 +131,7 @@ if trainer_params['load_previous_model']:
 
 trainer.train(trainer_params['epochs'], loss_function, simulator, model, data_loaders, optimizer, problem_params, observation_params, params_by_dataset, trainer_params)
 
-# deploy on test set, and enforce the discrete allocation if the demand is poisson
+# Deploy on test set, and enforce discrete allocation if the demand is poisson
 average_test_loss, average_test_loss_to_report = trainer.test(
     loss_function, 
     simulator, 
@@ -140,4 +144,4 @@ average_test_loss, average_test_loss_to_report = trainer.test(
     discrete_allocation=store_params['demand']['distribution'] == 'poisson'
     )
 
-print(f'test loss: {average_test_loss_to_report}')
+print(f'Average per-period test loss: {average_test_loss_to_report}')

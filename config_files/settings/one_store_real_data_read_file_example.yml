@@ -7,7 +7,7 @@ seeds :
   'demand': 57 
   'initial_inventory': 4839
 
-test_seeds :  # seeds for test set
+test_seeds :  # Seeds for test set
   'underage_cost': 36 
   'holding_cost': 81 
   'mean': 41 

@@ -2,24 +2,24 @@ trainer_params :
   'epochs': 1000 
   'do_dev_every_n_epochs': 1
   'print_results_every_n_epochs': 1
-  'save_model': False  # path to save is defined in main script
-  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
-  'choose_best_model_on': 'dev_loss'  # for early stopping, choose according to best performance on this dataset
+  'save_model': False  # Path to save is defined in main script
+  'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
+  'choose_best_model_on': 'dev_loss'  # For early stopping, choose according to best performance on this dataset
   'load_previous_model': False
   'load_model_path': null
 
 optimizer_params: 
-  'learning_rate': 0.0001
+  'learning_rate': 0.0003
 
 nn_params: 
   'name': 'vanilla_one_warehouse'
   'inner_layer_activations': 
     'master': 'elu'
-  'output_layer_activation':  # we will apply (sigmoid x upper_bound) to warehouse intermediate outputs on forward method!
+  'output_layer_activation':  # We will apply (sigmoid x upper_bound) to warehouse intermediate outputs on forward method!
     'master': null
   'neurons_per_hidden_layer':
     'master': [512, 512, 512]
   'output_sizes':
-    'master': null # if null, default is n_warehouse + n_stores (set in NeuralNetworkCreator)
+    'master': null # If null, default is n_warehouse + n_stores (set in NeuralNetworkCreator)
   'initial_bias': null
-  'warehouse_upper_bound_mult': 4
+  'warehouse_upper_bound_mult': 4  # Get warehouse upper bound by multiplying this number times average of sum of demands across stores

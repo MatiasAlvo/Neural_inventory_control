@@ -7,7 +7,7 @@ seeds :
   'demand': 57 
   'initial_inventory': 4839
 
-test_seeds :  # seeds for test set
+test_seeds :  # Seeds for test set
   'underage_cost': 36 
   'holding_cost': 81 
   'mean': 41 
@@ -70,7 +70,7 @@ store_params:
     'sample_across_stores': False
     'vary_across_samples': False
     'expand': True
-    'value': 20  # values tested: 1, 4, 7, 10, 15, 20
+    'value': 4  # Values tested: 1, 4, 7, 10, 15, 20
   'holding_cost': 
     'sample_across_stores': False 
     'vary_across_samples': False
@@ -80,11 +80,11 @@ store_params:
     'sample_across_stores': False
     'vary_across_samples': False 
     'expand': True
-    'value': 9.0  # values tested: 4, 9, 19, 39
+    'value': 9.0  # Values tested: 4, 9, 19, 39
   'initial_inventory': 
     'sample': True
     'range_mult': [0, 1]
-    'inventory_periods': 4  # initial inventory will be of size max(inventor0_periods, lead_time)
+    'inventory_periods': 4  # Initial inventory will be of size max(inventory_periods, lead_time)
 
 warehouse_params: 
   null   

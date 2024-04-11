@@ -7,7 +7,7 @@ seeds :
   'demand': 57 
   'initial_inventory': 4839
 
-test_seeds :  # seeds for test set
+test_seeds :  # Seeds for test set
   'underage_cost': 28 
   'holding_cost': 73 
   'mean': 33 
@@ -20,7 +20,7 @@ sample_data_params:
   'split_by_period': False
 
 problem_params : 
-  'n_stores': 55  # tested values: 3, 5, 10, 20, 30, 50
+  'n_stores': 5  # Tested values: 3, 5, 10, 20, 30, 50
   'n_warehouses': 1
   'n_extra_echelons': 0
   'lost_demand': True
@@ -28,7 +28,7 @@ problem_params :
 
 params_by_dataset : 
   'train': 
-    'n_samples': 8192  # tested values: 16, 256, 8192 for vanilla and symmetry-aware (for sym-aware, additionally 2, 4, 8)
+    'n_samples': 8192  # Tested values: 16, 256, 8192 for vanilla and symmetry-aware (for sym-aware, additionally 2, 4, 8)
     'batch_size': 1024 
     'periods': 50 
     'ignore_periods': 30 
@@ -72,7 +72,7 @@ store_params:
     'sample_across_stores': True
     'vary_across_samples': False
     'expand': False
-    'range': [2, 4] # recall that upper range is excluded from the possible values
+    'range': [2, 4] # Recall that upper range is excluded from the possible values
   'holding_cost': 
     'sample_across_stores': True 
     'vary_across_samples': False

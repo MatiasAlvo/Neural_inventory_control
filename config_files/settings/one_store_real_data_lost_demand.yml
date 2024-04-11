@@ -7,7 +7,7 @@ seeds :
   'demand': 57 
   'initial_inventory': 4839
 
-test_seeds :  # seeds for test set
+test_seeds :  # Seeds for test set
   'underage_cost': 36 
   'holding_cost': 81 
   'mean': 41 
@@ -75,7 +75,7 @@ store_params:
     'sample_across_stores': False
     'vary_across_samples': True
     'expand': False
-    'range': [4, 7]  # higher end is excluded from sampling!
+    'range': [4, 7]  # Higher end is excluded from sampling!
   'holding_cost': 
     'sample_across_stores': False 
     'vary_across_samples': False

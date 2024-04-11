@@ -29,7 +29,7 @@ problem_params :
 params_by_dataset : 
   'train': 
     'n_samples': 32768 
-    'batch_size': 8192  # values tested: 1024, 8192
+    'batch_size': 8192  # Values tested: 1024, 8192
     'periods': 50 
     'ignore_periods': 30 
   'dev': 
@@ -70,7 +70,7 @@ store_params:
     'sample_across_stores': False
     'vary_across_samples': False
     'expand': True
-    'value': 4  # values tested: 1, 2, 3, 4
+    'value': 4  # Values tested: 1, 2, 3, 4
   'holding_cost': 
     'sample_across_stores': False 
     'vary_across_samples': False
@@ -80,7 +80,7 @@ store_params:
     'sample_across_stores': False
     'vary_across_samples': False 
     'expand': True
-    'value': 9.0  # values tested: 4, 9, 19, 39
+    'value': 9.0  # Values tested: 4, 9, 19, 39
   'initial_inventory': 
     'sample': True
     'range_mult': [0, 1]

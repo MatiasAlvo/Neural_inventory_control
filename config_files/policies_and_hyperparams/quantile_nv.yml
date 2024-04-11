@@ -6,7 +6,7 @@ trainer_params :
   'load_previous_model': False
   'load_model_path': 'Code_to_submit/models_saved/test.pt'
   'choose_best_model_on': 'train_loss'
-  'epochs_between_save': 5  # save if cost improved, and at least this number of epochs have passed
+  'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
 
 optimizer_params: 
   'learning_rate': 0.03
@@ -23,7 +23,7 @@ nn_params:
   'output_sizes':
     'master': 1
   'forecaster_location': 
-    'Code_to_submit/quantile_forecasters/1700580865.pt'
+    'quantile_forecasters/1700580865.pt'
   'forecaster_lead_times': [4, 5, 6]
 
 
