@@ -59,27 +59,27 @@ observation_params:
   'include_past_observations':
     'arrivals': 8
     'orders': 8
-  'time_features_file': 'Code_to_submit/data_files/favorita/dates_with_info.csv'
+  'time_features_file': 'data_files/favorita/dates_with_info.csv'
   'time_features':
     ['days_from_christmas']
-  'sample_features_file': 'Code_to_submit/data_files/favorita/tensors_row_info.csv'
+  'sample_features_file': 'data_files/favorita/tensors_row_info.csv'
   'sample_features':
     ['store_nbr']
 
 store_params: 
   'demand': 
     'distribution': 'real'
-    'file_location': 'Code_to_submit/data_files/favorita/weekly_sales.pt'
+    'file_location': 'data_files/favorita/weekly_sales.pt'
     'sample_across_stores': False
     'expand': False
     'clip': False
     'decimals': 3
   'lead_time': 
-    'file_location': 'Code_to_submit/data_files/favorita/random_lead_times.pt'
+    'file_location': 'data_files/favorita/random_lead_times.pt'
   'holding_cost': 
-    'file_location': 'Code_to_submit/data_files/favorita/random_holding_costs.pt'
+    'file_location': 'data_files/favorita/random_holding_costs.pt'
   'underage_cost': 
-    'file_location': 'Code_to_submit/data_files/favorita/random_underage_costs.pt'
+    'file_location': 'data_files/favorita/random_underage_costs.pt'
   'initial_inventory': 
     'sample': False
     'inventory_periods': 6
@@ -97,7 +97,7 @@ trainer_params :
   'print_results_every_n_epochs': 1
   'save_model': False
   'load_previous_model': False
-  'load_model_path': 'Code_to_submit/models_saved/test.pt'
+  'load_model_path': 'models_saved/test.pt'
 
 optimizer_params: 
   'learning_rate': 0.003
