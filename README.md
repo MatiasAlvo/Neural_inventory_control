@@ -1,5 +1,5 @@
 # Neural Inventory Control
-Implementation of Hindsight Differentiable Policy Optimization, as described in the paper Neural Inventory Control in Networks via Hindsight Differentiable Policy Optimization
+Implementation of Hindsight Differentiable Policy Optimization, as described in the paper [Neural Inventory Control in Networks via Hindsight Differentiable Policy Optimization](https://arxiv.org/abs/2306.11246).
 
 ## Introduction
 
@@ -58,13 +58,13 @@ The main functionalities for the code are in the following scripts:
 
 4. `neural_networks.py`: Defines the neural network functionalities.
 
-5. `trainer.py`: Defines the Trainer class, which is in charge of the training itself, including handling the interactions with the simulator and the updated to a neural net's weights.
+5. `trainer.py`: Defines the Trainer class, which is in charge of the training itself, including handling the interactions with the simulator and updating the neural network's weights.
 
 Parameters for settings/instances and policies are to be defined in a config file under the **config_files/settings** and **config_files/policies_and_hyperparams**, respectively. Instructions on how to do this are detailed in a later section. 
 
 ## Populating a config file
 
-We provide config files for all the settings and all the policies described in our paper. A detailed description of is usage is as follows:
+We provide config files for all the settings and all the policies described in our paper. A detailed description of its usage is as follows.
 
 
 ### Setting config file
