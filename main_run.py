@@ -10,13 +10,13 @@ from trainer import *
 # config_hyperparams_file = 'config_files/policies_and_hyperparams/base_stock.yml'
 
 # One store lost demand setting
-# config_setting_file = 'config_files/settings/one_store_lost.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
+config_setting_file = 'config_files/settings/one_store_lost.yml'
+config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
 # config_hyperparams_file = 'config_files/policies_and_hyperparams/capped_base_stock.yml'
 
 # Serial system setting
-config_setting_file = 'config_files/settings/serial_system.yml'
-config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_serial.yml'
+# config_setting_file = 'config_files/settings/serial_system.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_serial.yml'
 # config_hyperparams_file = 'config_files/policies_and_hyperparams/echelon_stock.yml'
 
 # Transshipment center backlogged demand setting
