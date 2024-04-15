@@ -264,12 +264,14 @@ class Trainer():
         Plot train and test losses for each epoch
         """
 
-        plt.plot(self.all_train_losses, label='train loss')
-        plt.plot(self.all_test_losses, label='test loss')
+        plt.plot(self.all_train_losses, label='Train loss')
+        plt.plot(self.all_dev_losses, label='Dev loss')
         plt.legend()
 
         if ymin is not None and ymax is not None:
             plt.ylim(ymin, ymax)
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
         plt.show()
     
     def move_batch_to_device(self, data_batch):
