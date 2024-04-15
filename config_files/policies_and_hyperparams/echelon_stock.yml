@@ -1,0 +1,25 @@
+trainer_params : 
+  'epochs': 500 
+  'do_dev_every_n_epochs': 5 
+  'print_results_every_n_epochs': 10
+  'save_model': False
+  'load_previous_model': False
+  'load_model_path': 'Code_to_submit/models_saved/test.pt'
+  'choose_best_model_on': 'dev_loss'
+  'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
+
+optimizer_params: 
+  'learning_rate': 0.5
+
+nn_params: 
+  'name': 'echelon_stock'
+  'inner_layer_activations': 
+    'master': null
+  'output_layer_activation':
+    'master': null
+  'initial_bias':
+    'master': null
+  'neurons_per_hidden_layer':
+    'master': []
+  'output_sizes':
+    'master': 4

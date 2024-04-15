@@ -10,9 +10,14 @@ from trainer import *
 # config_hyperparams_file = 'config_files/policies_and_hyperparams/base_stock.yml'
 
 # One store lost demand setting
-config_setting_file = 'config_files/settings/one_store_lost.yml'
+# config_setting_file = 'config_files/settings/one_store_lost.yml'
 # config_hyperparams_file = 'config_files/policies_and_hyperparams/capped_base_stock.yml'
-config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
+
+# Serial system setting
+config_setting_file = 'config_files/settings/serial_system.yml'
+config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_serial.yml'
+# config_hyperparams_file = 'config_files/policies_and_hyperparams/echelon_stock.yml'
 
 # Transshipment center backlogged demand setting
 # config_setting_file = 'config_files/settings/transshipment_backlogged.yml'
@@ -39,9 +44,9 @@ with open(config_setting_file, 'r') as file:
 with open(config_hyperparams_file, 'r') as file:
     config_hyperparams = yaml.safe_load(file)
 
-setting_keys = 'seeds', 'test_seeds', 'problem_params', 'params_by_dataset', 'observation_params', 'store_params', 'warehouse_params', 'sample_data_params'
+setting_keys = 'seeds', 'test_seeds', 'problem_params', 'params_by_dataset', 'observation_params', 'store_params', 'warehouse_params', 'echelon_params', 'sample_data_params'
 hyperparams_keys = 'trainer_params', 'optimizer_params', 'nn_params'
-seeds, test_seeds, problem_params, params_by_dataset, observation_params, store_params, warehouse_params, sample_data_params = [
+seeds, test_seeds, problem_params, params_by_dataset, observation_params, store_params, warehouse_params, echelon_params, sample_data_params = [
     config_setting[key] for key in setting_keys
     ]
 
@@ -61,6 +66,7 @@ if sample_data_params['split_by_period']:
         problem_params=problem_params, 
         store_params=store_params, 
         warehouse_params=warehouse_params, 
+        echelon_params=echelon_params, 
         num_samples=params_by_dataset['train']['n_samples'],  # in this case, num_samples=number of products, which has to be the same across all datasets
         observation_params=observation_params, 
         seeds=seeds
@@ -83,6 +89,7 @@ else:
         problem_params=problem_params, 
         store_params=store_params, 
         warehouse_params=warehouse_params, 
+        echelon_params=echelon_params, 
         num_samples=params_by_dataset['train']['n_samples'] + params_by_dataset['dev']['n_samples'], 
         observation_params=observation_params, 
         seeds=seeds
@@ -95,6 +102,7 @@ else:
         problem_params, 
         store_params, 
         warehouse_params, 
+        echelon_params, 
         params_by_dataset['test']['n_samples'], 
         observation_params, 
         test_seeds

@@ -210,6 +210,67 @@ class BaseStock(MyNeuralNetwork):
         x = self.net['master'](torch.tensor([0.0]).to(self.device))  # Constant base stock level
         return {'stores': torch.clip(x - inv_pos, min=0)} # Clip output to be non-negative
 
+class EchelonStock(MyNeuralNetwork):
+    """
+    Echelon stock policy
+    """
+
+    def forward(self, observation):
+        """
+        Get a base-level for each location, which is the same across all samples.
+        We obtain base-levels via partial sums, which allowed us to avoid getting "stuck" in bad local minima.
+        Calculate allocation as max(base_level - inventory_position, 0) truncated above by previous location's inventory/
+        Contrary to how we define other policies, we will follow and indexing where locations are ordered from upstream to downstream (last is store).
+        """
+        store_inventories, warehouse_inventories, echelon_inventories = self.unpack_args(
+            observation, ['store_inventories', 'warehouse_inventories', 'echelon_inventories'])
+        n_extra_echelons = echelon_inventories.size(1)
+        
+        x = self.activation_functions['softplus'](self.net['master'](torch.tensor([0.0]).to(self.device)) + 10.0)  # Constant base stock levels
+        # The base level for each location wil be calculated as the outputs corresponding to all downstream locations and its own
+        base_levels = torch.cumsum(x, dim=0).flip(dims=[0])
+
+        # Inventory position (NOT echelon inventory position) for each location
+        stacked_inv_pos = torch.concat((echelon_inventories.sum(dim=2), warehouse_inventories.sum(dim=2), store_inventories.sum(dim=2)), dim=1)
+        
+        # Tensor with the inventory on hand for the preceding location for each location k
+        # For the left-most location, we set it to a large number, so that it does not truncate the allocation
+        shifted_inv_on_hand = torch.concat((
+            1000000*torch.ones_like(warehouse_inventories[:, :, 0]), 
+            echelon_inventories[:, :, 0], 
+            warehouse_inventories[:, :, 0]), 
+            dim=1
+            )
+
+        # print(f'base_levels: {base_levels}')
+        # print(f'stacked_inv_pos: {stacked_inv_pos[0]}')
+        # print(f'echelon_pos: {torch.stack([(stacked_inv_pos[:, k:].sum(dim=1)) for k in range(2 + n_extra_echelons)], dim=1)[0]}')
+
+        # Allocations before truncating by previous locations inventory on hand.
+        # We get them by subtracting the echelon inventory position (i.e., sum of inventory positions from k onwards) from the base levels, 
+        # and truncating below by 0.
+        tentative_allocations = torch.clip(
+            torch.stack([base_levels[k] - (stacked_inv_pos[:, k:].sum(dim=1)) 
+                         for k in range(2 + n_extra_echelons)], 
+                         dim=1), 
+                         min=0)
+        
+        # print(f'tentative_allocations: {tentative_allocations[0]}')
+        # Truncate below by previous locations inventory on hand
+        allocations = torch.minimum(tentative_allocations, shifted_inv_on_hand)
+
+        # print(f'shifted_inv_on_hand: {shifted_inv_on_hand[0]}')
+        # print(f'allocations: {allocations[0]}')
+
+        # print(f'stacked_inv_on_hand.shape: {shifted_inv_on_hand.shape}')
+        # print()
+
+        return {
+            'stores': allocations[:, -1:],
+            'warehouses': allocations[:, -2: -1],
+            'echelons': allocations[:, : n_extra_echelons],
+                } 
+
 class CappedBaseStock(MyNeuralNetwork):
     """"
     Simlar to BaseStock, but with a cap on the order
@@ -226,6 +287,47 @@ class CappedBaseStock(MyNeuralNetwork):
         base_level, cap = x[0], x[1]  # We interpret first input as base level, and second output as cap on the order
         
         return {'stores': torch.clip(base_level - inv_pos, min=torch.tensor([0.0]).to(self.device), max=cap)} # Clip output to be non-negative
+
+
+class VanillaSerial(MyNeuralNetwork):
+    """
+    Vanilla NN for serial system
+    """
+
+    def forward(self, observation):
+        """
+        We apply a sigmoid to the output of the master neural network, and multiply by the inventory on hand for the preceding location,
+        except for the left-most location, where we multiply by an upper bound on orders.
+        """
+        store_inventories, warehouse_inventories, echelon_inventories = self.unpack_args(
+            observation, ['store_inventories', 'warehouse_inventories', 'echelon_inventories'])
+        n_extra_echelons = echelon_inventories.size(1)
+        
+        input_tensor = self.flatten_then_concatenate_tensors([store_inventories, warehouse_inventories, echelon_inventories])
+        x = self.net['master'](torch.tensor(input_tensor).to(self.device))  # Constant base stock levels
+        # print(f'self.warehouse_upper_bound: {self.warehouse_upper_bound}')
+        # assert False
+
+        # Tensor with the inventory on hand for the preceding location for each location k
+        # For the left-most location, we set it to an upper bound (same as warehouse upper bound). Currently 4 times mean demand.
+        shifted_inv_on_hand = torch.concat((
+            self.warehouse_upper_bound.unsqueeze(1).expand(echelon_inventories.shape[0], -1),
+            echelon_inventories[:, :, 0], 
+            warehouse_inventories[:, :, 0]), 
+            dim=1
+            )
+        # print(f'x: {x.shape}')
+        # print(f'shifted_inv_on_hand: {shifted_inv_on_hand.shape}')
+        # print(f"self.activation_functions['sigmoid'](x): {self.activation_functions['sigmoid'](x)[0]}")
+        allocations = self.activation_functions['sigmoid'](x)*shifted_inv_on_hand
+        # print(f'allocations[0]: {allocations[0]}')
+
+
+        return {
+            'stores': allocations[:, -1:],
+            'warehouses': allocations[:, -2: -1],
+            'echelons': allocations[:, : n_extra_echelons],
+                } 
 
 
 class VanillaOneWarehouse(MyNeuralNetwork):
@@ -509,6 +611,8 @@ class NeuralNetworkCreator:
             'vanilla_one_store': VanillaOneStore, 
             'base_stock': BaseStock,
             'capped_base_stock': CappedBaseStock,
+            'echelon_stock': EchelonStock,
+            'vanilla_serial': VanillaSerial,
             'vanilla_transshipment': VanillaTransshipment,
             'vanilla_one_warehouse': VanillaOneWarehouse,
             'symmetry_aware': SymmetryAware,
@@ -526,8 +630,10 @@ class NeuralNetworkCreator:
         Get the warehouse upper bound, which is the sum of all store demands multiplied 
         by warehouse_upper_bound_mult (specified in config file)
         """
-        
-        return torch.tensor([warehouse_upper_bound_mult*sum(scenario.store_params['demand']['mean'])]).float().to(device)
+        mean = scenario.store_params['demand']['mean']
+        if type(mean) == float:
+            mean = [mean]
+        return torch.tensor([warehouse_upper_bound_mult*sum(mean)]).float().to(device)
     
     def create_neural_network(self, scenario, nn_params, device='cpu'):
 

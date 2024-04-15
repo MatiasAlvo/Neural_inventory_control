@@ -61,6 +61,10 @@ class Simulator(gym.Env):
 
         if self.problem_params['n_warehouses'] > 0:
             self._internal_data['warehouse_allocation_shift'] = self.initialize_shifts_for_allocation_put(data['initial_warehouse_inventories'].shape).long().to(self.device)
+        
+        if self.problem_params['n_extra_echelons'] > 0:
+            self._internal_data['echelon_allocation_shift'] = self.initialize_shifts_for_allocation_put(data['initial_echelon_inventories'].shape).long().to(self.device)
+
         self._internal_data['zero_allocation_tensor'] = self.initialize_zero_allocation_tensor(data['initial_inventories'].shape[: -1]).to(self.device)
 
         self.observation = self.initialize_observation(data, observation_params)
@@ -148,6 +152,15 @@ class Simulator(gym.Env):
                 )
             reward += w_reward
         
+        # Calculate reward and update other echelon inventories
+        if self.problem_params['n_extra_echelons'] > 0:
+
+            e_reward = self.calculate_echelon_reward_and_update_echelon_inventories(
+                action,
+                self.observation,
+                )
+            reward += e_reward
+        
         # Update current period
         self.observation['current_period'] += 1
 
@@ -234,6 +247,28 @@ class Simulator(gym.Env):
             )
 
         return reward.sum(dim=1)
+    
+    def calculate_echelon_reward_and_update_echelon_inventories(self, action, observation):
+        """
+        Calculate reward and observation after action is executed for warehouses
+        """
+
+        echelon_inventories = self.observation['echelon_inventories']
+        echelon_inventory_on_hand = echelon_inventories[:, :, 0]
+        actions_to_subtract = torch.concat([action['echelons'][:, 1:], action['warehouses'].sum(dim=1).unsqueeze(1)], dim=1)
+        post_echelon_inventory_on_hand = echelon_inventory_on_hand - actions_to_subtract
+
+        reward = observation['echelon_holding_costs'] * torch.clip(post_echelon_inventory_on_hand, min=0)
+
+        observation['echelon_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
+            echelon_inventories, 
+            post_echelon_inventory_on_hand, 
+            action['echelons'], 
+            observation['echelon_lead_times'], 
+            self._internal_data['echelon_allocation_shift']
+            )
+
+        return reward.sum(dim=1)
 
     def initialize_observation(self, data, observation_params):
         """
@@ -249,6 +284,11 @@ class Simulator(gym.Env):
             observation['warehouse_lead_times'] = data['warehouse_lead_times']
             observation['warehouse_holding_costs'] = data['warehouse_holding_costs']
             observation['warehouse_inventories'] = data['initial_warehouse_inventories']
+        
+        if self.problem_params['n_extra_echelons'] > 0:
+            observation['echelon_lead_times'] = data['echelon_lead_times']
+            observation['echelon_holding_costs'] = data['echelon_holding_costs']
+            observation['echelon_inventories'] = data['initial_echelon_inventories']
 
         # Include static features in observation (e.g., holding costs, underage costs, lead time and upper bounds)
         for k, v in observation_params['include_static_features'].items():
@@ -436,7 +476,6 @@ class Simulator(gym.Env):
         
         return torch.stack([*self.move_columns_left(tensor_to_displace, start_index, end_index), tensor_to_append],
                            dim=dim)
-    
 
     def move_left_add_first_col_and_append(self, post_inventory_on_hand, inventory, lead_time, action):
         """
@@ -449,17 +488,3 @@ class Simulator(gym.Env):
             *self.move_columns_left(inventory, 1, lead_time - 1), 
             action
             ], dim=2)
-
-    def update_observation(self, observation, action, demand):
-        """
-        Update the observation of the environment
-        """
-        inventory_on_hand = observation[:, :,  0] - demand
-        if self.lost_demand:
-            inventory_on_hand = torch.clip(inventory_on_hand, min=0)
-        
-        return torch.stack([inventory_on_hand + observation[:, :, 1],
-                            *self.move_columns_left(observation, 1, self.lead_time - 1),
-                            action],
-                            dim=2
-                            )

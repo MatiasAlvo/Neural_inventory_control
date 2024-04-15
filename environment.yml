@@ -1,4 +1,4 @@
-name: MatiasRL
+name: neural_inventory_control
 channels:
   - jmcmurray
   - defaults

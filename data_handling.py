@@ -2,14 +2,16 @@ from shared_imports import *
 
 class Scenario():
     '''
-    Class to generate a setting when there are parameters to be sampled.
-    For example, we might sample the mean demand and std for each store, which is later going to be used to sample actual demand samples
+    Class to generate an instance. 
+    First samples parameters (e.g, mean demand and std for each store, costs, lead times, etc...) if there are parameters to be sampled.
+    Then, creates demand traces, and the initial values (e.g., of inventory) to be used.
     '''
-    def __init__(self, periods, problem_params, store_params, warehouse_params, num_samples, observation_params, seeds=None):
+    def __init__(self, periods, problem_params, store_params, warehouse_params, echelon_params, num_samples, observation_params, seeds=None):
 
         self.problem_params = problem_params
         self.store_params = store_params
         self.warehouse_params = warehouse_params
+        self.echelon_params = echelon_params
         self.num_samples = num_samples
         self.periods = periods
         self.observation_params = observation_params
@@ -24,6 +26,10 @@ class Scenario():
         self.initial_warehouse_inventories = self.generate_initial_warehouse_inventory(warehouse_params)
         self.warehouse_lead_times = self.generate_warehouse_data(warehouse_params, 'lead_time')
         self.warehouse_holding_costs = self.generate_warehouse_data(warehouse_params, 'holding_cost')
+
+        self.initial_echelon_inventories = self.generate_initial_echelon_inventory(echelon_params)
+        self.echelon_lead_times = self.generate_echelon_data(echelon_params, 'lead_time')
+        self.echelon_holding_costs = self.generate_echelon_data(echelon_params, 'holding_cost')
 
         time_and_sample_features = {'time_features': {}, 'sample_features': {}}
 
@@ -58,6 +64,9 @@ class Scenario():
                 'initial_warehouse_inventories': self.initial_warehouse_inventories,
                 'warehouse_lead_times': self.warehouse_lead_times,
                 'warehouse_holding_costs': self.warehouse_holding_costs,
+                'initial_echelon_inventories': self.initial_echelon_inventories,
+                'echelon_holding_costs': self.echelon_holding_costs,
+                'echelon_lead_times': self.echelon_lead_times,
                 }
         
         for k, v in self.time_features.items():
@@ -67,14 +76,6 @@ class Scenario():
             data[k] = v
         
         return {k: v.float() for k, v in data.items() if v is not None}
-    
-    def get_fixed_across_samples_data(self):
-
-        params_fixed_across_samples = {
-            'days_from_christmas': self.days_from_christmas
-            }
-
-        return {k: v.float() for k, v in params_fixed_across_samples.items() if v is not None}
     
     def define_how_to_split_data(self):
         """
@@ -125,6 +126,9 @@ class Scenario():
         return torch.tensor(demand)
 
     def adjust_seeds_for_consistency(self, problem_params, store_params, seeds):
+        """
+        Adjust seeds for consistency with results prensented in the manuscript
+        """
 
         if problem_params['n_warehouses'] == 0 and problem_params['n_stores'] == 1 and store_params['demand']['distribution'] != 'real':
             try:
@@ -270,24 +274,43 @@ class Scenario():
                            warehouse_params['lead_time']
                            )
     
+    def generate_initial_echelon_inventory(self, echelon_params):
+        """
+        Generate initial echelon inventory data
+        """
+        if echelon_params is None:
+            return None
+        
+        return torch.zeros(self.num_samples, 
+                           len(echelon_params['lead_time']), 
+                           max(echelon_params['lead_time'])
+                           )
+    
     def generate_warehouse_data(self, warehouse_params, key):
         """
-        Generate warehouse lead time data
+        Generate warehouse data
         For now, it is simply fixed across all samples
         """
         if warehouse_params is None:
             return None
         
         return torch.tensor([warehouse_params[key]]).expand(self.num_samples, self.problem_params['n_warehouses'])
-
-    def generate_days_from_christmas(self, store_params):
-
-        if store_params['demand']['distribution'] == 'real' and False:
-            raise NotImplementedError
-        else:
+    
+    def generate_echelon_data(self, echelon_params, key):
+        """
+        Generate echelon_params data
+        For now, it is simply fixed across all samples
+        """
+        if echelon_params is None:
             return None
+        
+        return torch.tensor(echelon_params[key]).unsqueeze(0).expand(self.num_samples, -1)
     
     def generate_means_and_stds(self, observation_params, store_params):
+        """
+        Create tensors with store demand's means and stds.
+        Will be used as inputs for the symmetry-aware NN.
+        """
 
         to_return = {'mean': None, 'std': None}
         for k in ['mean', 'std']:
