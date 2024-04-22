@@ -44,13 +44,18 @@ conda env create -f environment.yml
 conda activate neural_inventory_control
 ```
 
-5. You can then run HDPO by running `main_run.py`. In that same file, you can define the config files to read from.
+5. Install torch with pip:
+```
+pip install torch
+```
+
+6. You can then run HDPO by running `main_run.py`. In that same file, you can define the config files to read from.
 
 ## Usage
 
 The main functionalities for the code are in the following scripts:
 
-1. `data_handling.py`: Defines how to create a Scenarios class (which is actually a collection of scenarios). This includes sampling parameters (such as demand or costs when they are obtained by sampling), and sampling the demand traces. It also defined the Dataset class.
+1. `data_handling.py`: Defines how to create a Scenarios class (which is actually a collection of scenarios). This includes sampling parameters (such as demand or costs when they are obtained by sampling), and sampling the demand traces. It also defines the Dataset class.
 
 2. `environment.py`: Defines the functionalities of the environment (simulator).
 
