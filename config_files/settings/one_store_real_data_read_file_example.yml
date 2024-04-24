@@ -89,7 +89,7 @@ warehouse_params:
   'lead_time': 4     
 
 echelon_params: 
-  None
+  null
 
 trainer_params : 
   'epochs': 1000 

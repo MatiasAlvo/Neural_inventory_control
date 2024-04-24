@@ -93,4 +93,4 @@ warehouse_params:
   'lead_time': 6     
 
 echelon_params: 
-  None
+  null

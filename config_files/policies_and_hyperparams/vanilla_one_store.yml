@@ -4,7 +4,7 @@ trainer_params :
   'print_results_every_n_epochs': 1
   'save_model': False
   'load_previous_model': False
-  'load_model_path': 'Code_to_submit/models_saved/test.pt'
+  'load_model_path': 'saved_models/2024_04_23/vanilla_one_store/1713902211.pt'
   'choose_best_model_on': 'dev_loss'
   'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
 

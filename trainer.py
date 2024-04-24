@@ -111,7 +111,7 @@ class Trainer():
     
     def test(self, loss_function, simulator, model, data_loaders, optimizer, problem_params, observation_params, params_by_dataset, discrete_allocation=False):
 
-        if model.trainable:
+        if model.trainable and self.best_performance_data['model_params_to_save'] is not None:
             # Load the parameter weights that gave the best performance on the specified dataset
             model.load_state_dict(self.best_performance_data['model_params_to_save'])
 

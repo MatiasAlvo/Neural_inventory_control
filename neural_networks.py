@@ -652,6 +652,5 @@ class NeuralNetworkCreator:
         # Calculate warehouse upper bound if specified in config file
         if 'warehouse_upper_bound_mult' in nn_params.keys():
             model.warehouse_upper_bound = self.get_warehouse_upper_bound(nn_params['warehouse_upper_bound_mult'], scenario, device)
-            print(f'model.warehouse_upper_bound: {model.warehouse_upper_bound}')
         
         return model.to(device)

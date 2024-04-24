@@ -49,8 +49,6 @@ conda activate neural_inventory_control
 pip install torch
 ```
 
-6. You can then run HDPO by running `main_run.py`. In that same file, you can define the config files to read from.
-
 ## Usage
 
 The main functionalities for the code are in the following scripts:
@@ -59,7 +57,7 @@ The main functionalities for the code are in the following scripts:
 
 2. `environment.py`: Defines the functionalities of the environment (simulator).
 
-3. `main_run.py`: Defines which config files to read from (for the setting and the policy class to use) and runs HDPO.
+3. `main_run.py`: Runs HDPO. We also provide a Jupyter notebook for the same purpose (`main_run.ipynb`).
 
 4. `neural_networks.py`: Defines the neural network functionalities.
 
@@ -67,22 +65,59 @@ The main functionalities for the code are in the following scripts:
 
 Parameters for settings/instances and policies are to be defined in a config file under the **config_files/settings** and **config_files/policies_and_hyperparams**, respectively. Instructions on how to do this are detailed in a later section. 
 
-## License
+The code can be executed from the terminal by running the following:
+```
+python3 main_run.py [mode] [config_file_path] [hyperparameters_file_path]
+```
+Here, `[mode]` can be either `train` or `test`. If `train` is specified, the model is executed on the test set after training. The last two parameters define the filenames for the configuration files for the environment and hyperparameters, respectively. For example, if you want to train (and then test) a model for the setting defined in `one_store_lost`, considering the hyperparameters (including neural network architecture) defined in the file `vanilla_one_store`, you should run:
+```
+python3 main_run.py train one_store_lost vanilla_one_store
+```
 
-MIT License
+We allow for providing the filenames for the setting and hyperparameter config files in `main_run.py`, in which case the last 2 parameters have to be omitted in the terminal. For example, you can run:
+```
+python3 main_run.py train
+```
+and specify the filenames within the main script.
 
-Copyright 2024 Matias Alvo, Daniel Russo, Yashodhan Kanoria
+## Settings and policy classes
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+We provide config files for all the settings and all the policies described in our paper. For detailed descriptions of the settings and neural network architectures that we consider, as well as which policy classes/architectures are considered for each setting, please refer to our [paper](https://arxiv.org/abs/2306.11246).
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The settings considered are the following:
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+- `one_store_backlogged`: One store under a backlogged demand assumption.
+- `one_store_lost`: One store under a lost demand assumption.
+- `one_store_real_data_lost_demand`: One store under a lost demand assumption, but considering demand traces built using sales data from a real retailer.
+- `one_store_real_data_read_file_example`: Same as the previous one, but in which all problem primitives (lead times, underage costs and holding costs) are read from files. We provide this example for instructional purposes.
+- `one_warehouse_lost_demand`: One warehouse and many stores, under a lost demand assumption.
+- `serial_system`: Serial system, in which inventory flows linearly from upstream towards downstream locations. Considers a backlogged demand assumption
+- `transshipment_backlogged`: One transshipment center (i.e., a warehouse that cannot hold inventory) and many stores, under a backlogged demand assumption.
+
+The policy classes we consider are the following:
+- `base_stock`: Base stock policy (optimal for the setting of one store under a backlogged demand assumption).
+- `capped_base_stock`: Capped base stock policy (well-performing for the setting of one store under a lost demand assumption).
+- `data_driven_net`: Defines a direct mapping from time-series data (previous demands, orders and arrivals) and current inventory on-hand to an order amount. In our paper, we refer to it as HDPO (end-to-end) in the section "HDPO with real time series data". This policy class can be modified to utilize a different set of features.
+- `echelon_stock`: Echelon stock policy (optimal for a serial system under a backlogged demand assumption).
+- `fixed_quantile`: Generalized newsvendor policy, that utilizes the same quantile for each scenario.
+- `just_in_time`: Non-admissible oracle policy, that looks into the future and orders to precisely meet future demand.
+- `quantile_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]).
+- `returns_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]), but allows for negative orders. It defines a non-admissible policy.
+- `symmetry_aware`: Symmetry-aware neural network for settings with one warehouse and many stores.
+- `transformed_nv`: Generalized newsvendor policy, that considers a flexible mapping from newsvendor quantile (p/[p+h]) to a new quantile. This quantile is therefore different across scenarios, but fixed across time for each scenario.
+- `vanilla_one_store`: Vanilla neural network for settings with one store and no warehouse.
+- `vanilla_one_warehouse`: Vanilla neural network for settings with one warehouse and many stores.
+- `vanilla_serial`: Vanilla neural network for the serial system setting.
+- `vanilla_transshipment`: Vanilla neural network for the setting with one transshipment center and many stores.
+
+To create a new policy class, follow these steps:
+
+1. Open the `neural_networks.py` file.
+2. Inside `neural_networks.py`, create a new class that inherits from `MyNeuralNetwork`. Define the `forward` method within this class to specify the forward pass of your neural network architecture.
+3. In the `get_architecture` method of the `NeuralNetworkCreator` class (located in neural_networks.py), add your newly created neural network to the dictionary of architectures.
+4. Finally, create a config file for your policy class under `config/files/policies_and_hyperparams`. This config should define the necessary parameters to instantiate your policy, as well as other parameters (to be defined below).
 
 ## Populating a config file
-
-We provide config files for all the settings and all the policies described in our paper. A detailed description of its usage is as follows.
-
 
 ### Setting config file
 
@@ -186,3 +221,15 @@ are generated by copying all values (costs and lead times), and splitting demand
 - `initial_bias`: Initial bias for the last layer of each component/module of the neural network.
 - `forecaster_location`: Location for loading quantile forecaster, if used within the policy.
 - `warehouse_upper_bound_mult`: Multiplier to calculate the upper bound for warehouse outputs.
+
+## License
+
+MIT License
+
+Copyright 2024 Matias Alvo, Daniel Russo, Yashodhan Kanoria
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

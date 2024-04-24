@@ -1,42 +1,28 @@
 import yaml
 import pandas as pd
 from trainer import *
+import sys
 
-# Uncomment one config_setting_file and one config_hyperparams_file
+# Check if command-line arguments for setting and hyperparameter filenames are provided (which corresponds to third and fourth parameters)
+if len(sys.argv) == 4:
+    setting_name = sys.argv[2]
+    hyperparams_name = sys.argv[3]
 
-# One store backlogged demand setting
-# config_setting_file = 'config_files/settings/one_store_backlogged.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/base_stock.yml'
+elif len(sys.argv) == 2:
+    setting_name = 'one_store_lost'  # One store under lost demand setting
+    hyperparams_name = 'vanilla_one_store'  # Vanilla neural network for one store setting
+else:
+    print(f'Number of parameters provided including script name: {len(sys.argv)}')
+    print(f'Number of parameters should be either 4 or 2 (so that last 2 parameters defined in main_run.py)')
+    assert False
 
-# One store lost demand setting
-config_setting_file = 'config_files/settings/one_store_lost.yml'
-config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_store.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/capped_base_stock.yml'
+train_or_test = sys.argv[1]
 
-# Serial system setting
-# config_setting_file = 'config_files/settings/serial_system.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_serial.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/echelon_stock.yml'
+print(f'Setting file name: {setting_name}')
+print(f'Hyperparams file name: {hyperparams_name}\n')
 
-# Transshipment center backlogged demand setting
-# config_setting_file = 'config_files/settings/transshipment_backlogged.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_transshipment.yml'
-
-# One warehouse lost demand setting
-# config_setting_file = 'config_files/settings/one_warehouse_lost_demand.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/symmetry_aware.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/vanilla_one_warehouse.yml'
-
-# One store lost demand with realistic demand data setting
-# config_setting_file = 'config_files/settings/one_store_real_data_lost_demand.yml'
-# config_setting_file = 'config_files/settings/one_store_real_data_read_file_example.yml'  # example of how to read all data from files
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/just_in_time.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/returns_nv.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/quantile_nv.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/fixed_quantile.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/transformed_nv.yml'
-# config_hyperparams_file = 'config_files/policies_and_hyperparams/data_driven_net.yml'
+config_setting_file = f'config_files/settings/{setting_name}.yml'
+config_hyperparams_file = f'config_files/policies_and_hyperparams/{hyperparams_name}.yml'
 
 with open(config_setting_file, 'r') as file:
     config_setting = yaml.safe_load(file)
@@ -137,19 +123,25 @@ if trainer_params['load_previous_model']:
     print(f'Loading model from {trainer_params["load_model_path"]}')
     model, optimizer = trainer.load_model(model, optimizer, trainer_params['load_model_path'])
 
-trainer.train(trainer_params['epochs'], loss_function, simulator, model, data_loaders, optimizer, problem_params, observation_params, params_by_dataset, trainer_params)
+if train_or_test == 'train':
+    trainer.train(trainer_params['epochs'], loss_function, simulator, model, data_loaders, optimizer, problem_params, observation_params, params_by_dataset, trainer_params)
 
-# Deploy on test set, and enforce discrete allocation if the demand is poisson
-average_test_loss, average_test_loss_to_report = trainer.test(
-    loss_function, 
-    simulator, 
-    model, 
-    data_loaders, 
-    optimizer, 
-    problem_params, 
-    observation_params, 
-    params_by_dataset, 
-    discrete_allocation=store_params['demand']['distribution'] == 'poisson'
-    )
+elif train_or_test in ['test', 'train']:
+    # Deploy on test set, and enforce discrete allocation if the demand is poisson
+    average_test_loss, average_test_loss_to_report = trainer.test(
+        loss_function, 
+        simulator, 
+        model, 
+        data_loaders, 
+        optimizer, 
+        problem_params, 
+        observation_params, 
+        params_by_dataset, 
+        discrete_allocation=store_params['demand']['distribution'] == 'poisson'
+        )
 
-print(f'Average per-period test loss: {average_test_loss_to_report}')
+    print(f'Average per-period test loss: {average_test_loss_to_report}')
+
+else:
+    print(f'Invalid argument: {train_or_test}')
+    assert False
