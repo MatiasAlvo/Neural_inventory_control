@@ -102,7 +102,7 @@ test_loader = DataLoader(test_dataset, batch_size=params_by_dataset['test']['bat
 data_loaders = {'train': train_loader, 'dev': dev_loader, 'test': test_loader}
 
 neural_net_creator = NeuralNetworkCreator
-model = neural_net_creator().create_neural_network(scenario, nn_params, device=device)
+model = neural_net_creator().create_neural_network(scenario, nn_params, problem_params, device=device)
 
 loss_function = PolicyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=optimizer_params['learning_rate'])

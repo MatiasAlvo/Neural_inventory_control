@@ -20,6 +20,7 @@ class Scenario():
         self.underage_costs = self.generate_data_for_samples_and_stores(problem_params, store_params['underage_cost'], seeds['underage_cost'], discrete=False)
         self.holding_costs = self.generate_data_for_samples_and_stores(problem_params, store_params['holding_cost'], seeds['holding_cost'], discrete=False)
         self.lead_times = self.generate_data_for_samples_and_stores(problem_params, store_params['lead_time'], seeds['lead_time'], discrete=True).to(torch.int64)
+        self.num_real_stores = self.generate_data_for_samples_and_stores(problem_params, store_params['num_real_stores'], seeds['num_real_stores'], discrete=True).to(torch.int64)
         self.means, self.stds = self.generate_means_and_stds(observation_params, store_params)
         self.initial_inventories = self.generate_initial_inventories(problem_params, store_params, self.demands, self.lead_times, seeds['initial_inventory'])
         
@@ -58,6 +59,7 @@ class Scenario():
                 'underage_costs': self.underage_costs,
                 'holding_costs': self.holding_costs,
                 'lead_times': self.lead_times,
+                'num_real_stores': self.num_real_stores,
                 'mean': self.means,
                 'std': self.stds,
                 'initial_inventories': self.initial_inventories,
@@ -84,7 +86,7 @@ class Scenario():
         However, if it is generated, the split is according to sample indexes
         """
 
-        split_by = {'sample_index': ['underage_costs', 'holding_costs', 'lead_times', 'initial_inventories', 'initial_warehouse_inventories'], 
+        split_by = {'sample_index': ['underage_costs', 'holding_costs', 'lead_times', 'num_real_stores', 'initial_inventories', 'initial_warehouse_inventories'], 
                     'period': []}
 
         if self.store_params['demand']['distribution'] == 'real':

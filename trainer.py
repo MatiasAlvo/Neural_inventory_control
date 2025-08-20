@@ -157,10 +157,16 @@ class Trainer():
             
             mean_loss = total_reward/(len(data_batch['demands'])*periods*problem_params['n_stores'])
             
-            # Backward pass (to calculate gradient) and take gradient step
+            # # Backward pass (to calculate gradient) and take gradient step
+            # if train and model.trainable:
+            #     mean_loss.backward()
+            #     optimizer.step()
             if train and model.trainable:
                 mean_loss.backward()
+                if model.gradient_clipping_norm_value is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), model.gradient_clipping_norm_value)
                 optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
         
         return epoch_loss/(total_samples*periods*problem_params['n_stores']), epoch_loss_to_report/(total_samples*periods_tracking_loss*problem_params['n_stores'])
     

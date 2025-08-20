@@ -4,6 +4,7 @@ seeds :
   'mean': 33
   'coef_of_var': 92 
   'lead_time': 41 
+  'num_real_stores': 394
   'demand': 57 
   'initial_inventory': 4839
 
@@ -13,6 +14,7 @@ test_seeds :  # Seeds for test set
   'mean': 33 
   'coef_of_var': 92
   'lead_time': 41
+  'num_real_stores': 394
   'demand': 65
   'initial_inventory': 4839
 
@@ -20,7 +22,8 @@ sample_data_params:
   'split_by_period': False
 
 problem_params : 
-  'n_stores': 5  # Tested values: 3, 5, 10, 20, 30, 50
+  'n_stores': 10  # Tested values: 3, 5, 10, 20, 30, 50
+  'dummy_stores': 3  # Tested values: 3, 5, 10, 20, 30, 50
   'n_warehouses': 1
   'n_extra_echelons': 0
   'lost_demand': True
@@ -49,6 +52,7 @@ observation_params:
     'holding_costs': True 
     'underage_costs': True 
     'lead_times': True 
+    'num_real_stores': True
     'mean': True 
     'std': True 
   'demand': 
@@ -72,7 +76,12 @@ store_params:
     'sample_across_stores': True
     'vary_across_samples': False
     'expand': False
-    'range': [2, 4] # Recall that upper range is excluded from the possible values
+    'range': [2, 6] # Recall that upper range is excluded from the possible values
+  'num_real_stores': 
+    'sample_across_stores': False
+    'vary_across_samples': True
+    'expand': False
+    'range': [2, 6] # Recall that upper range is excluded from the possible values
   'holding_cost': 
     'sample_across_stores': True 
     'vary_across_samples': False
@@ -90,7 +99,7 @@ store_params:
 
 warehouse_params: 
   'holding_cost': 0.3
-  'lead_time': 6     
+  'lead_time': 3     
 
 echelon_params: 
   null

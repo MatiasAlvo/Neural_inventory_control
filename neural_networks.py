@@ -1,9 +1,11 @@
 from shared_imports import *
 from quantile_forecaster import FullyConnectedForecaster
+from torch.nn import functional as F
+# import torch
 
 class MyNeuralNetwork(nn.Module):
 
-    def __init__(self, args, device='cpu'):
+    def __init__(self, args, problem_params=None, device='cpu'):
         """"
         Initialize neural network with given parameters
 
@@ -22,6 +24,7 @@ class MyNeuralNetwork(nn.Module):
 
         super().__init__() # initialize super class
         self.device = device
+        self.gradient_clipping_norm_value = None
 
         # Some models are not trainable (e.g. news-vendor policies), so we need to flag it to the trainer
         # so it does not perform greadient steps (otherwise, it will raise an error)
@@ -590,6 +593,133 @@ class JustInTime(MyNeuralNetwork):
 
         return {"stores": torch.clip(future_demands, min=0)}
 
+class GNN(MyNeuralNetwork):
+    def __init__(self, args, problem_params, device='cpu'):
+        super().__init__(args, problem_params, device)
+        self.n_stores = problem_params['n_stores']
+        self.dummy_stores = problem_params['dummy_stores']
+        self.NN_per_layer = 'NN_per_layer' in args and args['NN_per_layer']
+        self.self_loop = 'self_loop' in args and args['self_loop']
+        self.n_MP = None
+        self.gradient_clipping_norm_value = 1
+        if 'n_MP' in args:
+            self.n_MP = args['n_MP']
+
+    def get_store_inventory_and_params(self, observation):
+        params_to_stack = ['mean', 'std', 'holding_costs', 'underage_costs']
+        list_to_cat = [observation[k].unsqueeze(-1) for k in params_to_stack if k in observation]
+        return torch.cat([observation['store_inventories'], *list_to_cat], dim=2)
+    
+    def get_warehouse_inventory_and_params(self, observation):
+        params_to_cat = ['warehouse_holding_costs']
+        list_to_cat_to_unsqueeze = [observation[k].unsqueeze(-1) for k in params_to_cat]
+        return torch.cat([observation['warehouse_inventories'], *list_to_cat_to_unsqueeze], dim=-1)
+
+    def get_network(self, layer_name, layer_idx):
+        if self.NN_per_layer:
+            return self.net[f'{layer_name}_{layer_idx+1}']
+        else:
+            return self.net[layer_name]
+
+    def forward(self, observation):
+
+
+        def pad_features(tensor, inv_len, max_inv_len, max_states_len):
+            inv = tensor[:,:,:inv_len]
+            states = tensor[:,:,inv_len:]
+            return torch.cat([
+                F.pad(inv, (0, max_inv_len - inv_len)),
+                F.pad(states, (0, max_states_len - (tensor.size(2) - inv_len)))
+            ], dim=2)
+        
+        
+        # TODO: mask state entries corresponding to dummy stores in store state
+        # be careful with division by sqrt(n_stores) normalization factor
+        # zero out dummy stores in store allocation
+        # you can access the number of real stores for each scenario with observation['num_real_stores'][:, 0]
+
+        store_inv_len = observation['store_inventories'].size(2)
+        warehouse_inv_len = observation['warehouse_inventories'].size(2)
+        n_warehouses = observation['warehouse_inventories'].size(1)
+
+        # get states
+        store_state = self.get_store_inventory_and_params(observation)
+
+        
+        warehouse_state = self.get_warehouse_inventory_and_params(observation)
+        max_inv_len = max(store_inv_len, warehouse_inv_len)
+
+        # get problem primitives/parameters
+        store_primitives_len = store_state.size(2) - store_inv_len
+        warehouse_primitives_len = warehouse_state.size(2) - warehouse_inv_len
+        max_primitives_len = max(store_primitives_len, warehouse_primitives_len)
+
+        # fill with zeros to make all states have the same length
+        store_padded = pad_features(store_state, store_inv_len, max_inv_len, max_primitives_len)
+        warehouse_padded = pad_features(warehouse_state, warehouse_inv_len, max_inv_len, max_primitives_len)
+
+        states = torch.cat([warehouse_padded, store_padded], dim=1)
+        n_MP = 1
+        if self.n_MP is not None:
+            n_MP = self.n_MP
+        
+        # here is where we embed the nodes
+        nodes = self.net['initial_node'](states)
+
+        # get edges for each location
+        supplier_warehouse_edges_input = torch.cat([torch.zeros_like(nodes[:, :1]), nodes[:, :1], observation['warehouse_lead_times'].unsqueeze(-1)], dim=-1)
+        warehouse_store_edges_input = torch.cat([nodes[:, :1].repeat(1, self.n_stores, 1), nodes[:, 1:], observation['lead_times'].unsqueeze(-1)], dim=-1)
+        store_clients_edges_input = torch.cat([nodes[:, 1:], torch.zeros_like(nodes[:, 1:]), torch.zeros_like(observation['lead_times'].unsqueeze(-1))], dim=-1)
+        
+        # embed edges
+        edges_input = torch.cat([supplier_warehouse_edges_input, warehouse_store_edges_input, store_clients_edges_input], dim=1)
+        edges = self.net['initial_edge'](edges_input)
+
+        for layer_idx in range(n_MP):
+            edges_for_aggregation = edges
+            warehouse_supplier_aggregation = edges_for_aggregation[:, :1, :]
+
+            warehouse_recipient_aggregation = torch.sum(edges_for_aggregation[:, 1:1 + self.n_stores, :], dim=1, keepdim=True) / torch.sqrt(torch.tensor(self.n_stores, device=self.device))
+                
+            store_supplier_aggregation = edges_for_aggregation[:, 1:1 + self.n_stores, :]
+            store_recipient_aggregation = edges_for_aggregation[:, 1 + self.n_stores:1 + 2 * self.n_stores, :]
+
+            node_update_input = torch.cat(
+                [torch.cat([nodes[:, :1], warehouse_supplier_aggregation, warehouse_recipient_aggregation], dim=-1),
+                    torch.cat([nodes[:, 1:], store_supplier_aggregation, store_recipient_aggregation], dim=-1)],
+                dim=1
+            )
+            nodes_updates = self.get_network('node_update', layer_idx)(node_update_input)
+            nodes = nodes + nodes_updates
+
+            supplier_warehouse_edges_update_input = torch.cat([edges[:, :1], torch.zeros_like(nodes[:, :1]), nodes[:, :1]], dim=-1)
+            warehouse_store_edges_update_input = torch.cat([edges[:, 1:1 + self.n_stores], nodes[:, :1].repeat(1, self.n_stores, 1), nodes[:, 1:]], dim=-1)
+            
+            store_clients_edges_update_input = torch.cat([edges[:, 1 + self.n_stores:1 + 2 * self.n_stores], nodes[:, 1:], torch.zeros_like(nodes[:, 1:])], dim=-1)
+            
+            edges_update_input = torch.cat([supplier_warehouse_edges_update_input, warehouse_store_edges_update_input, store_clients_edges_update_input], dim=1)
+
+            edges_updates = self.get_network('edge_update', layer_idx)(edges_update_input)
+            edges = edges + edges_updates
+
+        outputs = self.net['output'](edges[:, :1 + self.n_stores, :])
+
+        store_intermediate_outputs = outputs[:, 1:]
+        warehouse_allocation = outputs[:, :1, 0]
+
+        store_allocation = self.apply_proportional_allocation(
+            store_intermediate_outputs[:,:,0], 
+            observation['warehouse_inventories'],
+            )
+
+        result = {
+            'stores': store_allocation,
+            'warehouses': warehouse_allocation
+        }
+        result['stores_intermediate_outputs'] = store_intermediate_outputs[:,:,0]
+        return result
+
+
 class NeuralNetworkCreator:
     """
     Class to create neural networks
@@ -622,6 +752,7 @@ class NeuralNetworkCreator:
             'quantile_nv': QuantileNV,
             'returns_nv': ReturnsNV,
             'just_in_time': JustInTime,
+            'GNN': GNN,
             }
         return architectures[name]
     
@@ -635,7 +766,7 @@ class NeuralNetworkCreator:
             mean = [mean]
         return torch.tensor([warehouse_upper_bound_mult*sum(mean)]).float().to(device)
     
-    def create_neural_network(self, scenario, nn_params, device='cpu'):
+    def create_neural_network(self, scenario, nn_params, problem_params, device='cpu'):
 
         nn_params_copy = copy.deepcopy(nn_params)
 
@@ -646,6 +777,7 @@ class NeuralNetworkCreator:
 
         model = self.get_architecture(nn_params_copy['name'])(
             nn_params_copy, 
+            problem_params,
             device=device
             )
         
