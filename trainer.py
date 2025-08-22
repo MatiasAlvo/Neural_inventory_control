@@ -133,7 +133,7 @@ class Trainer():
                 params_by_dataset['test']['periods'], 
                 problem_params, 
                 observation_params, 
-                train=True, 
+                train=False, 
                 ignore_periods=params_by_dataset['test']['ignore_periods'],
                 discrete_allocation=discrete_allocation
                 )
@@ -150,26 +150,28 @@ class Trainer():
         total_samples = len(data_loader.dataset)
         periods_tracking_loss = periods - ignore_periods  # Number of periods for which we report the loss
 
-        for i, data_batch in enumerate(data_loader):  # Loop through batches of data
-            data_batch = self.move_batch_to_device(data_batch)
-            
-            if train:
-                # Zero-out the gradient
-                optimizer.zero_grad()
+        # Use no_grad context for evaluation (when train=False)
+        with torch.no_grad() if not train else torch.enable_grad():
+            for i, data_batch in enumerate(data_loader):  # Loop through batches of data
+                data_batch = self.move_batch_to_device(data_batch)
+                
+                if train:
+                    # Zero-out the gradient
+                    optimizer.zero_grad()
 
-            # Forward pass
-            total_reward, reward_to_report = self.simulate_batch(
-                loss_function, simulator, model, periods, problem_params, data_batch, observation_params, ignore_periods, discrete_allocation
-                )
-            epoch_loss += total_reward.item()  # Rewards from period 0
-            epoch_loss_to_report += reward_to_report.item()  # Rewards from period ignore_periods onwards
-            
-            mean_loss = total_reward/(len(data_batch['demands'])*periods*problem_params['n_stores'])
-            
-            # Backward pass (to calculate gradient) and take gradient step
-            if train and model.trainable:
-                mean_loss.backward()
-                optimizer.step()
+                # Forward pass
+                total_reward, reward_to_report = self.simulate_batch(
+                    loss_function, simulator, model, periods, problem_params, data_batch, observation_params, ignore_periods, discrete_allocation
+                    )
+                epoch_loss += total_reward.item()  # Rewards from period 0
+                epoch_loss_to_report += reward_to_report.item()  # Rewards from period ignore_periods onwards
+                
+                mean_loss = total_reward/(len(data_batch['demands'])*periods*problem_params['n_stores'])
+                
+                # Backward pass (to calculate gradient) and take gradient step
+                if train and model.trainable:
+                    mean_loss.backward()
+                    optimizer.step()
         
         return epoch_loss/(total_samples*periods*problem_params['n_stores']), epoch_loss_to_report/(total_samples*periods_tracking_loss*problem_params['n_stores'])
     
