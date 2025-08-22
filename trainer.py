@@ -15,6 +15,7 @@ class Trainer():
         self.device = device
         self.time_stamp = self.get_time_stamp()
         self.best_performance_data = {'train_loss': np.inf, 'dev_loss': np.inf, 'last_epoch_saved': -1000, 'model_params_to_save': None}
+        self.best_epoch = 0
     
     def reset(self):
         """
@@ -96,6 +97,14 @@ class Trainer():
                 # Check if the current model is the best model so far, and save the model parameters if so.
                 # Save the model if specified in the trainer_params
                 self.update_best_params_and_save(epoch, average_train_loss_to_report, average_dev_loss_to_report, trainer_params, model, optimizer)
+                
+                # Check for early stopping
+                early_stopping_patience = trainer_params.get('early_stopping_patience_epochs', None)
+                if early_stopping_patience is not None and (epoch - self.best_epoch) >= early_stopping_patience:
+                    print(f'\nEarly stopping triggered at epoch {epoch + 1}')
+                    print(f'No improvement for {epoch - self.best_epoch} epochs')
+                    print(f'Best model was at epoch {self.best_epoch + 1} with dev loss: {self.best_performance_data["dev_loss"]}')
+                    break
                 
             else:
                 average_dev_loss, average_dev_loss_to_report = 0, 0
@@ -252,6 +261,8 @@ class Trainer():
             if model.trainable:
                 self.best_performance_data['model_params_to_save'] = copy.deepcopy(model.state_dict())
             self.best_performance_data['update'] = True
+            # Update best epoch when improvement is found
+            self.best_epoch = epoch
 
         if trainer_params['save_model'] and model.trainable:
             if self.best_performance_data['last_epoch_saved'] + trainer_params['epochs_between_save'] <= epoch and self.best_performance_data['update']:
