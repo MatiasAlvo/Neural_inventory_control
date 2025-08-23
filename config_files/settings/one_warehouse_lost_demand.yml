@@ -87,7 +87,7 @@ store_params:
 
 warehouse_params: 
   'holding_cost': 0.3
-  'lead_time': 6     
+  'lead_time': 3     
 
 echelon_params: 
   null
