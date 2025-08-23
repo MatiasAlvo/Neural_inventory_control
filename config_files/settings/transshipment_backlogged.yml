@@ -58,7 +58,7 @@ store_params:
   'demand': 
     'sample_across_stores': True
     'mean_range': [2.5, 7.5]
-    'coef_of_var_range': [0.16, 0.32]
+    'coef_of_var_range': [0.25, 0.5]
     'distribution': 'normal'
     'correlation': 0.5  # Tested values: 0.0, 0.5
     'clip': False
