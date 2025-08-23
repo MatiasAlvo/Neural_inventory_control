@@ -70,8 +70,10 @@ if sample_data_params['split_by_period']:
 # One can use this method of generating scenarios to train a model using some specific problem primitives, 
 # and then test it on a different set of problem primitives, by simply creating a new scenario with the desired primitives.
 else:
+    # Use the maximum periods needed across train and dev sets to avoid dimension mismatch
+    max_periods = max(params_by_dataset['train']['periods'], params_by_dataset['dev']['periods'])
     scenario = Scenario(
-        periods=params_by_dataset['train']['periods'], 
+        periods=max_periods, 
         problem_params=problem_params, 
         store_params=store_params, 
         warehouse_params=warehouse_params, 

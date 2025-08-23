@@ -1,12 +1,13 @@
 trainer_params : 
-  'epochs': 500 
-  'do_dev_every_n_epochs': 5 
-  'print_results_every_n_epochs': 10
+  'epochs': 20000 
+  'do_dev_every_n_epochs': 10
+  'early_stopping_patience_epochs': 500  # Stop if dev loss doesn't improve for this many epochs
+  'print_results_every_n_epochs': 1
   'save_model': False
   'load_previous_model': False
   'load_model_path': 'Code_to_submit/models_saved/test.pt'
   'choose_best_model_on': 'dev_loss'
-  'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
+  'epochs_between_save': 10  # Save if cost improved, and at least this number of epochs have passed
 
 optimizer_params: 
   'learning_rate': 0.5

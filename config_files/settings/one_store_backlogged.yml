@@ -34,14 +34,14 @@ params_by_dataset :
     'ignore_periods': 30 
   'dev': 
     'n_samples': 32768 
-    'batch_size': 8192 
-    'periods': 50 
-    'ignore_periods': 30 
+    'batch_size': 32768 
+    'periods': 100 
+    'ignore_periods': 60
   'test': 
     'n_samples': 32768 
-    'batch_size': 8192 
-    'periods': 500 
-    'ignore_periods': 300
+    'batch_size': 32768 
+    'periods': 5000
+    'ignore_periods': 3000
 
 observation_params:
   'include_warehouse_inventory': False
