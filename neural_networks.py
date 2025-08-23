@@ -1,5 +1,7 @@
 from shared_imports import *
 from quantile_forecaster import FullyConnectedForecaster
+import torch.nn.functional as F
+import math
 
 class MyNeuralNetwork(nn.Module):
 
@@ -26,6 +28,9 @@ class MyNeuralNetwork(nn.Module):
         # Some models are not trainable (e.g. news-vendor policies), so we need to flag it to the trainer
         # so it does not perform greadient steps (otherwise, it will raise an error)
         self.trainable = True
+        
+        # Get gradient clipping value from config (if specified)
+        self.gradient_clipping_norm_value = args.get('gradient_clipping_norm_value', None)
         
         # Define activation functions, which will be called in forward method
         self.activation_functions = {
@@ -588,6 +593,7 @@ class JustInTime(MyNeuralNetwork):
 
         return {"stores": torch.clip(future_demands, min=0)}
 
+
 class NeuralNetworkCreator:
     """
     Class to create neural networks
@@ -620,6 +626,7 @@ class NeuralNetworkCreator:
             'quantile_nv': QuantileNV,
             'returns_nv': ReturnsNV,
             'just_in_time': JustInTime,
+            'gnn': GNN,
             }
         return architectures[name]
     

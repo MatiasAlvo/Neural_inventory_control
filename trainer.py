@@ -171,6 +171,9 @@ class Trainer():
                 # Backward pass (to calculate gradient) and take gradient step
                 if train and model.trainable:
                     mean_loss.backward()
+                    # Apply gradient clipping if specified
+                    if hasattr(model, 'gradient_clipping_norm_value') and model.gradient_clipping_norm_value is not None:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), model.gradient_clipping_norm_value)
                     optimizer.step()
         
         return epoch_loss/(total_samples*periods*problem_params['n_stores']), epoch_loss_to_report/(total_samples*periods_tracking_loss*problem_params['n_stores'])
