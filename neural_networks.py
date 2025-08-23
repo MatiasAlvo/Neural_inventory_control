@@ -427,7 +427,7 @@ class DataDrivenNet(MyNeuralNetwork):
     
     def forward(self, observation):
         """
-        Utilize inventory on-hand, past demands, arrivals, orders, underage costs, and days from Christmas to output store orders directly
+        Utilize inventory on-hand, past demands, underage costs, and days from Christmas to output store orders directly
         """
 
         # Input tensor is given by full store inventories, past demands, underage costs for 

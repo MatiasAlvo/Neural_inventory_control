@@ -53,9 +53,6 @@ observation_params:
   'demand': 
     'past_periods': 0 
     'period_shift': 0
-  'include_past_observations':
-    'arrivals': 0
-    'orders': 0
   'include_days_to_christmas': False
 
 store_params: 
