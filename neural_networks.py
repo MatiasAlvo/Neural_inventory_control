@@ -427,16 +427,14 @@ class DataDrivenNet(MyNeuralNetwork):
     
     def forward(self, observation):
         """
-        Utilize inventory on-hand, past demands, arrivals, orders, underage costs, and days from Christmas to output store orders directly
+        Utilize inventory on-hand, past demands, underage costs, and days from Christmas to output store orders directly
         """
 
-        # Input tensor is given by current inventory on hand, past demands, arrivals and orders, and underage costs for 
+        # Input tensor is given by full store inventories, past demands, underage costs for 
         # each sample path, and days from Christmas
         input_tensor = self.flatten_then_concatenate_tensors(
-            [
-                observation['store_inventories'][:, :, 0]] + 
-                [observation[key] for key in ['past_demands', 'arrivals', 'orders', 'underage_costs', 'days_from_christmas']
-                ]
+                [observation['store_inventories']] + 
+                [observation[key] for key in ['past_demands', 'underage_costs', 'days_from_christmas', 'lead_times']]
             )
 
         return {'stores': self.net['master'](input_tensor)} # Clip output to be non-negative

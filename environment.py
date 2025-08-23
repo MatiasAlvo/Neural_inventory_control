@@ -123,9 +123,9 @@ class Simulator(gym.Env):
             current_period=self.observation['current_period'].item()
             )
         
-        # Update observation corresponding to past occurrences (e.g., arrivals, orders, demands).
+        # Update observation corresponding to past demands.
         # Do this before updating current period (as we consider current period + 1)
-        self.update_past_data(action)
+        self.update_past_data()
 
         # Update time related features (e.g., days to christmas)
         self.update_time_features(
@@ -295,10 +295,6 @@ class Simulator(gym.Env):
             if v:
                 observation[k] = data[k]
 
-        # Initialize data for past observations of certain data (e.g., arrivals, orders)
-        for k, v in observation_params['include_past_observations'].items():
-            if v > 0:
-                observation[k] = torch.zeros(self.batch_size, self.n_stores, v).to(self.device)
 
         # Initialize past demands in the observation
         if observation_params['demand']['past_periods'] > 0:
@@ -336,11 +332,9 @@ class Simulator(gym.Env):
         # Initialize defaultdict to a dictionary with specific keys
         box_values = DefaultDict(lambda: {'low': -np.inf, 'high': np.inf, 'dtype': np.float32})
         box_values.update({
-            'arrivals': {'low': 0 if problem_params['lost_demand'] else -np.inf, 'high': np.inf, 'dtype': np.float32},
             'holding_costs': {'low': 0, 'high': np.inf, 'dtype': np.float32},
             'lead_times': {'low': 0, 'high': 2*10, 'dtype': np.int8},
             'days_to_christmas': {'low': -365, 'high': 365, 'dtype': np.int8},
-            'orders': {'low': 0, 'high': np.inf, 'dtype': np.float32},
             'past_demands': {'low': -np.inf, 'high': np.inf, 'dtype': np.float32},
             'store_inventories': {'low': 0 if problem_params['lost_demand'] else -np.inf, 'high': np.inf, 'dtype': np.float32},
             'warehouse_inventories': {'low': 0, 'high': np.inf, 'dtype': np.float32},
@@ -437,9 +431,9 @@ class Simulator(gym.Env):
         
         return days_to_christmas
 
-    def update_past_data(self, action):
+    def update_past_data(self):
         """
-        Update the past data observations (e.g. last demands, arrivals and orders) in the observation
+        Update the past data observations (e.g. last demands) in the observation
         """
 
         if self._internal_data['demands'].shape[2] + 2 < self.observation['current_period'].item():
@@ -452,12 +446,6 @@ class Simulator(gym.Env):
                 self.n_stores,
                 current_period=min(self.observation['current_period'].item() + 1, self._internal_data['demands'].shape[2])  # do this before updating current period!
                 )
-        
-        if self.observation_params['include_past_observations']['arrivals'] > 0:
-            self.observation['arrivals'] = self.move_left_and_append(self.observation['arrivals'], self.observation['store_inventories'][:, :, 1])
-        
-        if self.observation_params['include_past_observations']['orders'] > 0:
-            self.observation['orders'] = self.move_left_and_append(self.observation['orders'], action['stores'])
 
     def move_columns_left(self, tensor_to_displace, start_index, end_index):
         """

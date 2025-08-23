@@ -5,7 +5,7 @@ trainer_params :
   'save_model': False
   'load_previous_model': False
   'load_model_path': 'Code_to_submit/models_saved/test.pt'
-  'choose_best_model_on': 'train_loss'
+  'choose_best_model_on': 'dev_loss'
   'epochs_between_save': 5  # Save if cost improved, and at least this number of epochs have passed
 
 optimizer_params: 

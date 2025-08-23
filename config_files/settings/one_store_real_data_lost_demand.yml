@@ -18,9 +18,9 @@ test_seeds :  # Seeds for test set
 
 sample_data_params:
   'split_by_period': True
-  'train_periods': (0, 120)
-  'dev_periods': (104, 170)
-  'test_periods': (154, 200)
+  'train_periods': (0, 111)
+  'dev_periods': (88, 141)
+  'test_periods': (118, 171)
 
 problem_params : 
   'n_stores': 1
@@ -33,18 +33,18 @@ params_by_dataset :
   'train': 
     'n_samples': 32768 
     'batch_size': 8192 
-    'periods': 104 
+    'periods': 95 
     'ignore_periods': 16
   'dev': 
     'n_samples': 32768 
-    'batch_size': 8192 
-    'periods': 50 
+    'batch_size': 32768 
+    'periods': 37 
     'ignore_periods': 16 
   'test': 
     'n_samples': 32768 
-    'batch_size': 8192 
-    'periods': 30 
-    'ignore_periods': 10
+    'batch_size': 32768 
+    'periods': 37 
+    'ignore_periods': 16
 
 observation_params:
   'include_warehouse_inventory': False
@@ -56,9 +56,6 @@ observation_params:
   'demand': 
     'past_periods': 16 
     'period_shift': 16
-  'include_past_observations':
-    'arrivals': 8
-    'orders': 8
   'time_features_file': 'data_files/favorita/dates_with_info.csv'
   'time_features':
     ['days_from_christmas']
@@ -91,8 +88,7 @@ store_params:
     'inventory_periods': 6
 
 warehouse_params: 
-  'holding_cost': 0.3
-  'lead_time': 4     
+  null
 
 echelon_params: 
   null
