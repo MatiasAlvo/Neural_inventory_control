@@ -605,14 +605,6 @@ class GNN(MyNeuralNetwork):
         # Store scenario for creating graph network in forward pass
         self.scenario = scenario
         
-        # Extract GNN-specific architecture parameters
-        self.graph_params = args.get('graph_architecture', {})
-        self.num_message_passing_steps = self.graph_params.get('num_message_passing_steps', 2)
-        self.aggregation_method = self.graph_params.get('aggregation_method', 'mean')  # mean, sum, max
-        self.use_residual_connections = self.graph_params.get('use_residual_connections', True)
-        self.edge_feature_dim = self.graph_params.get('edge_feature_dim', 32)
-        self.node_feature_dim = self.graph_params.get('node_feature_dim', 32)
-        
     def prepare_graph_and_features(self, observation):
         """
         Prepares graph structure and node features from observation.
@@ -926,13 +918,8 @@ class GNN(MyNeuralNetwork):
         store_incoming = edges[:, 1:1+n_stores]
         
         # Outgoing messages aggregation  
-        # Warehouse sends to stores
-        if self.aggregation_method == 'mean':
-            warehouse_outgoing = edges[:, 1:1+n_stores].mean(dim=1, keepdim=True)
-        elif self.aggregation_method == 'sum':
-            warehouse_outgoing = edges[:, 1:1+n_stores].sum(dim=1, keepdim=True)
-        elif self.aggregation_method == 'max':
-            warehouse_outgoing = edges[:, 1:1+n_stores].max(dim=1)[0].unsqueeze(1)
+        # Warehouse sends to stores (using mean aggregation)
+        warehouse_outgoing = edges[:, 1:1+n_stores].mean(dim=1, keepdim=True)
         
         warehouse_outgoing = (warehouse_outgoing + edges[:, -1:]) / math.sqrt(2)
         
@@ -956,10 +943,8 @@ class GNN(MyNeuralNetwork):
         node_input = torch.cat([nodes, incoming, outgoing], dim=-1)
         node_updates = self.net['node_update'](node_input)
         
-        if self.use_residual_connections:
-            nodes = nodes + node_updates
-        else:
-            nodes = node_updates
+        # Apply residual connections
+        nodes = nodes + node_updates
         
         # Prepare edge sources and targets for edge update
         supplier_node = torch.zeros_like(nodes[:, :1])
@@ -979,19 +964,16 @@ class GNN(MyNeuralNetwork):
             customer_nodes,  # Stores -> Customers
         ], dim=1)
         
-        # Add self-loop if enabled
-        if self.use_self_loops:
-            edge_sources = torch.cat([edge_sources, warehouse_node], dim=1)
-            edge_targets = torch.cat([edge_targets, warehouse_node], dim=1)
+        # Add self-loop
+        edge_sources = torch.cat([edge_sources, warehouse_node], dim=1)
+        edge_targets = torch.cat([edge_targets, warehouse_node], dim=1)
         
         # Update edges
         edge_input = torch.cat([edges, edge_sources, edge_targets], dim=-1)
         edge_updates = self.net['edge_update'](edge_input)
         
-        if self.use_residual_connections:
-            edges = edges + edge_updates
-        else:
-            edges = edge_updates
+        # Apply residual connections
+        edges = edges + edge_updates
         
         return nodes, edges
     
@@ -1011,8 +993,8 @@ class GNN(MyNeuralNetwork):
         # Initial edge embeddings
         edges = self.net['initial_edge'](edges)
         
-        # Message passing iterations
-        for _ in range(self.num_message_passing_steps):
+        # Message passing iterations (default: 2 steps)
+        for _ in range(2):
             nodes, edges = self.message_passing_step(nodes, edges)
         
         # Generate outputs from edges
@@ -1021,21 +1003,15 @@ class GNN(MyNeuralNetwork):
         store_intermediate = self.net['output'](edges[:, 1:1+n_stores]).squeeze(-1)
         
         # Apply proportional allocation for stores based on warehouse inventory
-        if self.use_self_loops:
-            warehouse_self_loop_output = self.net['output'](edges[:, -1:]).squeeze(-1)
-            all_outputs = torch.cat([store_intermediate, warehouse_self_loop_output], dim=1)
-            allocations = self.apply_proportional_allocation(
-                all_outputs, 
-                observation['warehouse_inventories']
-            )
-            store_orders = allocations[:, :-1]
-            self_loop_order = allocations[:, -1:]
-        else:
-            store_orders = self.apply_proportional_allocation(
-                store_intermediate.unsqueeze(-1), 
-                observation['warehouse_inventories']
-            ).squeeze(-1)
-            self_loop_order = torch.zeros_like(warehouse_order.unsqueeze(-1))
+        # Include self-loop in the allocation
+        warehouse_self_loop_output = self.net['output'](edges[:, -1:]).squeeze(-1)
+        all_outputs = torch.cat([store_intermediate, warehouse_self_loop_output], dim=1)
+        allocations = self.apply_proportional_allocation(
+            all_outputs, 
+            observation['warehouse_inventories']
+        )
+        store_orders = allocations[:, :-1]
+        self_loop_order = allocations[:, -1:]
         
         return {
             'warehouses': warehouse_order,
