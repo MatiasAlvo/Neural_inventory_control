@@ -825,7 +825,7 @@ class GNN(MyNeuralNetwork):
         ], dim=2)
     
     
-    def create_edges(self, graph_network, nodes):
+    def create_edge_features(self, graph_network, nodes):
         """
         Create edge features for the supply chain graph based on adjacency matrix.
         
@@ -834,7 +834,7 @@ class GNN(MyNeuralNetwork):
             nodes: Node embeddings tensor
             
         Returns:
-            edges: Tensor of edge features [batch_size, num_edges, edge_feature_dim]
+            edge_features: Tensor of edge features [batch_size, num_edges, edge_feature_dim]
         """
         adjacency = graph_network['adjacency']
         has_outside_supplier = graph_network['has_outside_supplier']
@@ -902,9 +902,9 @@ class GNN(MyNeuralNetwork):
             self_loops = torch.cat([node_features, node_features, self_loop_lead_times], dim=-1)
             edge_list.append(self_loops)
         
-        # Concatenate all edges
-        edges = torch.cat(edge_list, dim=1)
-        return edges
+        # Concatenate all edge features
+        edge_features = torch.cat(edge_list, dim=1)
+        return edge_features
     
     def aggregate_messages(self, edges):
         """Aggregate messages for nodes based on aggregation method."""
@@ -987,11 +987,11 @@ class GNN(MyNeuralNetwork):
         # Initial node embeddings
         nodes = self.net['initial_node'](all_features)
         
-        # Create initial edges using graph network structure
-        edges = self.create_edges(graph_network, nodes)
+        # Create initial edge features using graph network structure
+        edge_features = self.create_edge_features(graph_network, nodes)
         
         # Initial edge embeddings
-        edges = self.net['initial_edge'](edges)
+        edges = self.net['initial_edge'](edge_features)
         
         # Message passing iterations (default: 2 steps)
         for _ in range(2):
