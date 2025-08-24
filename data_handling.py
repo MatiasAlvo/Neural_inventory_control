@@ -268,15 +268,22 @@ class Scenario():
     
     def generate_initial_warehouse_inventory(self, warehouse_params):
         """
-        Generate initial warehouse inventory data
+        Generate initial warehouse inventory data for multiple warehouses
         """
         if warehouse_params is None:
             return None
         
+        n_warehouses = self.problem_params['n_warehouses']
+        
+        # Handle lead_time as either scalar or list
+        if isinstance(warehouse_params['lead_time'], list):
+            max_lead_time = max(warehouse_params['lead_time'])
+        else:
+            max_lead_time = warehouse_params['lead_time']
+        
         return torch.zeros(self.num_samples, 
-                           1, 
-                           warehouse_params['lead_time']
-                           )
+                           n_warehouses, 
+                           max_lead_time)
     
     def generate_initial_echelon_inventory(self, echelon_params):
         """
@@ -292,13 +299,23 @@ class Scenario():
     
     def generate_warehouse_data(self, warehouse_params, key):
         """
-        Generate warehouse data
-        For now, it is simply fixed across all samples
+        Generate warehouse data for multiple warehouses
+        Supports both scalar values (same for all warehouses) and lists (different per warehouse)
         """
         if warehouse_params is None:
             return None
         
-        return torch.tensor([warehouse_params[key]]).expand(self.num_samples, self.problem_params['n_warehouses'])
+        n_warehouses = self.problem_params['n_warehouses']
+        value = warehouse_params[key]
+        
+        if isinstance(value, list):
+            # Different values for each warehouse
+            if len(value) != n_warehouses:
+                raise ValueError(f"warehouse_params['{key}'] list length {len(value)} doesn't match n_warehouses {n_warehouses}")
+            return torch.tensor(value).unsqueeze(0).expand(self.num_samples, -1)
+        else:
+            # Same value for all warehouses
+            return torch.tensor([value]).expand(self.num_samples, n_warehouses)
     
     def generate_echelon_data(self, echelon_params, key):
         """
