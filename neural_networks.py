@@ -614,15 +614,15 @@ class GNN(MyNeuralNetwork):
         self.edge_feature_dim = self.graph_params.get('edge_feature_dim', 32)
         self.node_feature_dim = self.graph_params.get('node_feature_dim', 32)
         
-    def create_graph_network(self, observation):
+    def prepare_graph_and_features(self, observation):
         """
-        Creates a graph network structure from the observation.
+        Prepares graph structure and node features from observation.
         
         Args:
             observation: Current observation from environment
             
         Returns:
-            dict: Graph network with adjacency matrix and node metadata
+            tuple: (graph_network dict, node_features tensor)
         """
         device = observation['store_inventories'].device
         problem_params = self.scenario.problem_params
@@ -702,16 +702,65 @@ class GNN(MyNeuralNetwork):
                 # Store nodes are indices [n_warehouses, n_warehouses + n_stores)
                 adjacency[:n_warehouses, n_warehouses:] = warehouse_store_adjacency
         
+        # Prepare node features - collect in order: [echelons?, warehouse, stores]
+        features_list = []
+        inv_lengths = []
+        
+        # Echelon features first (if present)
+        if n_extra_echelons > 0:
+            echelon_inv_len = observation['echelon_inventories'].size(-1)
+            echelon_features = torch.cat([
+                observation['echelon_inventories'],
+                observation['echelon_holding_costs'].unsqueeze(-1)
+            ], dim=-1)
+            features_list.append(echelon_features)
+            inv_lengths.append(echelon_inv_len)
+        
+        # Warehouse features
+        warehouse_inv_len = observation['warehouse_inventories'].size(-1)
+        warehouse_features = torch.cat([
+            observation['warehouse_inventories'],
+            observation['warehouse_holding_costs'].unsqueeze(-1)
+        ], dim=-1)
+        features_list.append(warehouse_features)
+        inv_lengths.append(warehouse_inv_len)
+        
+        # Store features last
+        store_inv_len = observation['store_inventories'].size(-1)
+        store_features = torch.cat([
+            observation['store_inventories'],
+            observation['holding_costs'].unsqueeze(-1),
+            observation['underage_costs'].unsqueeze(-1),
+        ], dim=-1)
+        features_list.append(store_features)
+        inv_lengths.append(store_inv_len)
+        
+        # Determine max sizes for uniform padding
+        max_inv_len = max(inv_lengths)
+        max_states_len = max(
+            feat.size(-1) - inv_len 
+            for feat, inv_len in zip(features_list, inv_lengths)
+        )
+        
+        # Pad all features to same size
+        padded_features = [
+            self._pad_features(feat, inv_len, max_inv_len, max_states_len)
+            for feat, inv_len in zip(features_list, inv_lengths)
+        ]
+        
+        # Single concatenation - already in order: [echelons?, warehouse, stores]
+        all_features = torch.cat(padded_features, dim=1)
+        
         graph_network = {
             'adjacency': adjacency,
             'has_outside_supplier': has_outside_supplier,
             'has_demand': has_demand
         }
         
-        return graph_network
+        return graph_network, all_features
     
-    def pad_features(self, tensor, inv_len, max_inv_len, max_states_len):
-        """Pad inventory and state features to uniform size."""
+    def _pad_features(self, tensor, inv_len, max_inv_len, max_states_len):
+        """Helper to pad inventory and state features to uniform size."""
         inv = tensor[:,:,:inv_len]
         states = tensor[:,:,inv_len:]
         return torch.cat([
@@ -719,40 +768,6 @@ class GNN(MyNeuralNetwork):
             F.pad(states, (0, max_states_len - (tensor.size(2) - inv_len)))
         ], dim=2)
     
-    def prepare_node_features(self, observation):
-        """Prepare and normalize node features for GNN."""
-        # Store features: inventories + costs + lead_times
-        store_inv_len = observation['store_inventories'].size(-1)
-        store_features = torch.cat([
-            observation['store_inventories'],
-            observation['holding_costs'].unsqueeze(-1),
-            observation['underage_costs'].unsqueeze(-1),
-            observation['lead_times'].unsqueeze(-1)
-        ], dim=-1)
-        
-        # Warehouse features: inventories + holding_costs
-        warehouse_inv_len = observation['warehouse_inventories'].size(-1)
-        warehouse_features = torch.cat([
-            observation['warehouse_inventories'],
-            observation['warehouse_holding_costs'].unsqueeze(-1)
-        ], dim=-1)
-        
-        # Determine max sizes for padding
-        max_inv_len = max(store_inv_len, warehouse_inv_len)
-        max_states_len = max(
-            store_features.size(-1) - store_inv_len,
-            warehouse_features.size(-1) - warehouse_inv_len
-        )
-        
-        # Pad to same size
-        store_features = self.pad_features(store_features, store_inv_len, max_inv_len, max_states_len)
-        warehouse_features = self.pad_features(warehouse_features, warehouse_inv_len, max_inv_len, max_states_len)
-        
-        # Concatenate all node features [batch, n_nodes, features]
-        # Nodes order: [warehouse, stores]
-        all_features = torch.cat([warehouse_features, store_features], dim=1)
-        
-        return all_features
     
     def create_edges(self, nodes, observation):
         """Create edge features for the supply chain graph."""
@@ -886,12 +901,8 @@ class GNN(MyNeuralNetwork):
         """
         Forward pass through GNN for one warehouse many stores case.
         """
-        # Create graph network structure from observation
-        # This stores the adjacency matrix and node metadata for the GNN
-        _ = self.create_graph_network(observation)  # Currently for validation, could be used for dynamic routing
-        
-        # Prepare node features
-        all_features = self.prepare_node_features(observation)
+        # Prepare graph structure and node features
+        graph_network, all_features = self.prepare_graph_and_features(observation)
         
         # Initial node embeddings
         nodes = self.net['initial_node'](all_features)
@@ -931,7 +942,8 @@ class GNN(MyNeuralNetwork):
         return {
             'warehouses': warehouse_order,
             'stores': store_orders,
-            'warehouse_self_loop_orders': self_loop_order
+            'warehouse_self_loop_orders': self_loop_order,
+            'graph_network': graph_network
         }
 
 
