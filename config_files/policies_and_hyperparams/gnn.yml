@@ -13,7 +13,7 @@ optimizer_params:
   'learning_rate': 0.001
 
 nn_params: 
-  'name': 'GNN'
+  'name': 'gnn'
   'inner_layer_activations': 
     'initial_node': 'elu'
     'initial_edge': 'elu'

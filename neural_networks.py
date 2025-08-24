@@ -593,6 +593,309 @@ class JustInTime(MyNeuralNetwork):
 
         return {"stores": torch.clip(future_demands, min=0)}
 
+class GNN(MyNeuralNetwork):
+    """
+    Graph Neural Network for one warehouse many stores case.
+    Uses message passing between warehouse and stores.
+    """
+    
+    def __init__(self, args, scenario, device='cpu'):
+        super().__init__(args, device)
+        
+        # Store scenario for creating graph network in forward pass
+        self.scenario = scenario
+        
+        # Extract GNN-specific architecture parameters
+        self.graph_params = args.get('graph_architecture', {})
+        self.num_message_passing_steps = self.graph_params.get('num_message_passing_steps', 2)
+        self.aggregation_method = self.graph_params.get('aggregation_method', 'mean')  # mean, sum, max
+        self.use_self_loops = self.graph_params.get('use_self_loops', True)
+        self.use_residual_connections = self.graph_params.get('use_residual_connections', True)
+        self.edge_feature_dim = self.graph_params.get('edge_feature_dim', 32)
+        self.node_feature_dim = self.graph_params.get('node_feature_dim', 32)
+        
+    def create_graph_network(self, observation):
+        """
+        Creates a graph network structure from the observation.
+        
+        Args:
+            observation: Current observation from environment
+            
+        Returns:
+            dict: Graph network with adjacency matrix and node metadata
+        """
+        device = observation['store_inventories'].device
+        problem_params = self.scenario.problem_params
+        
+        n_stores = problem_params.get('n_stores', 0)
+        n_warehouses = problem_params.get('n_warehouses', 0)
+        n_extra_echelons = problem_params.get('n_extra_echelons', 0)
+        
+        # Initialize adjacency as None, will be created in each case
+        adjacency = None
+        has_outside_supplier = None
+        has_demand = None
+        
+        # Serial network case (when n_extra_echelons exists)
+        if n_extra_echelons > 0:
+            # Serial network: echelons -> warehouse -> store
+            # Node ordering: [echelon_0, echelon_1, ..., warehouse, store]
+            n_nodes = n_extra_echelons + n_warehouses + n_stores
+            adjacency = torch.zeros(n_nodes, n_nodes, dtype=torch.int32, device=device)
+            has_outside_supplier = torch.zeros(n_nodes, dtype=torch.int32, device=device)
+            has_demand = torch.zeros(n_nodes, dtype=torch.int32, device=device)
+            
+            # Define node indices
+            warehouse_idx = n_extra_echelons
+            store_idx = n_extra_echelons + n_warehouses  # Only one store
+            
+            # First echelon connects to outside supplier
+            has_outside_supplier[0] = 1
+            
+            # Connect echelons in series
+            for i in range(n_extra_echelons - 1):
+                adjacency[i, i + 1] = 1  # Echelon i -> Echelon i+1
+            
+            # Last echelon connects to warehouse (warehouse always exists in serial case)
+            adjacency[n_extra_echelons - 1, warehouse_idx] = 1  # Last echelon -> Warehouse
+            
+            # Warehouse connects to store (store always exists and is single in serial case)
+            adjacency[warehouse_idx, store_idx] = 1
+            
+            # Store connects to demand
+            has_demand[store_idx] = 1
+        
+        graph_network = {
+            'adjacency': adjacency,
+            'has_outside_supplier': has_outside_supplier,
+            'has_demand': has_demand
+        }
+        
+        return graph_network
+    
+    def pad_features(self, tensor, inv_len, max_inv_len, max_states_len):
+        """Pad inventory and state features to uniform size."""
+        inv = tensor[:,:,:inv_len]
+        states = tensor[:,:,inv_len:]
+        return torch.cat([
+            F.pad(inv, (0, max_inv_len - inv_len)),
+            F.pad(states, (0, max_states_len - (tensor.size(2) - inv_len)))
+        ], dim=2)
+    
+    def prepare_node_features(self, observation):
+        """Prepare and normalize node features for GNN."""
+        # Store features: inventories + costs + lead_times
+        store_inv_len = observation['store_inventories'].size(-1)
+        store_features = torch.cat([
+            observation['store_inventories'],
+            observation['holding_costs'].unsqueeze(-1),
+            observation['underage_costs'].unsqueeze(-1),
+            observation['lead_times'].unsqueeze(-1)
+        ], dim=-1)
+        
+        # Warehouse features: inventories + holding_costs
+        warehouse_inv_len = observation['warehouse_inventories'].size(-1)
+        warehouse_features = torch.cat([
+            observation['warehouse_inventories'],
+            observation['warehouse_holding_costs'].unsqueeze(-1)
+        ], dim=-1)
+        
+        # Determine max sizes for padding
+        max_inv_len = max(store_inv_len, warehouse_inv_len)
+        max_states_len = max(
+            store_features.size(-1) - store_inv_len,
+            warehouse_features.size(-1) - warehouse_inv_len
+        )
+        
+        # Pad to same size
+        store_features = self.pad_features(store_features, store_inv_len, max_inv_len, max_states_len)
+        warehouse_features = self.pad_features(warehouse_features, warehouse_inv_len, max_inv_len, max_states_len)
+        
+        # Concatenate all node features [batch, n_nodes, features]
+        # Nodes order: [warehouse, stores]
+        all_features = torch.cat([warehouse_features, store_features], dim=1)
+        
+        return all_features
+    
+    def create_edges(self, nodes, observation):
+        """Create edge features for the supply chain graph."""
+        n_stores = self.scenario.problem_params.get('n_stores', 0)
+        
+        # Virtual supplier node
+        supplier_node = torch.zeros_like(nodes[:, :1])
+        warehouse_node = nodes[:, :1]
+        store_nodes = nodes[:, 1:]
+        
+        # Edge 1: Supplier -> Warehouse
+        warehouse_lead = observation['warehouse_lead_times'].unsqueeze(-1)
+        supplier_warehouse_edge = torch.cat([
+            supplier_node, warehouse_node, warehouse_lead
+        ], dim=-1)
+        
+        # Edge 2: Warehouse -> Stores
+        warehouse_expanded = warehouse_node.expand(-1, n_stores, -1)
+        store_leads = observation['lead_times'].unsqueeze(-1)
+        warehouse_store_edges = torch.cat([
+            warehouse_expanded, store_nodes, store_leads
+        ], dim=-1)
+        
+        # Edge 3: Stores -> Customers
+        customer_nodes = torch.zeros_like(store_nodes)
+        customer_leads = torch.zeros_like(store_leads)
+        store_customer_edges = torch.cat([
+            store_nodes, customer_nodes, customer_leads
+        ], dim=-1)
+        
+        # Combine all edges
+        all_edges = [supplier_warehouse_edge, warehouse_store_edges, store_customer_edges]
+        
+        # Add self-loops if enabled
+        if self.use_self_loops:
+            warehouse_self_loop = torch.cat([
+                warehouse_node, warehouse_node, 
+                torch.zeros_like(warehouse_lead)
+            ], dim=-1)
+            all_edges.append(warehouse_self_loop)
+        
+        edges = torch.cat(all_edges, dim=1)
+        return edges
+    
+    def aggregate_messages(self, edges):
+        """Aggregate messages for nodes based on aggregation method."""
+        n_stores = self.scenario.problem_params.get('n_stores', 0)
+        
+        # Incoming messages aggregation
+        # Warehouse gets messages from supplier edge and self-loop
+        if self.use_self_loops:
+            warehouse_incoming = (edges[:, 0:1] + edges[:, -1:]) / math.sqrt(2)
+        else:
+            warehouse_incoming = edges[:, 0:1]
+        
+        # Stores get messages from warehouse edges
+        store_incoming = edges[:, 1:1+n_stores]
+        
+        # Outgoing messages aggregation  
+        # Warehouse sends to stores
+        if self.aggregation_method == 'mean':
+            warehouse_outgoing = edges[:, 1:1+n_stores].mean(dim=1, keepdim=True)
+        elif self.aggregation_method == 'sum':
+            warehouse_outgoing = edges[:, 1:1+n_stores].sum(dim=1, keepdim=True)
+        elif self.aggregation_method == 'max':
+            warehouse_outgoing = edges[:, 1:1+n_stores].max(dim=1)[0].unsqueeze(1)
+        
+        if self.use_self_loops:
+            warehouse_outgoing = (warehouse_outgoing + edges[:, -1:]) / math.sqrt(2)
+        
+        # Stores send to customers
+        store_outgoing = edges[:, 1+n_stores:1+2*n_stores]
+        
+        # Combine aggregated messages
+        incoming = torch.cat([warehouse_incoming, store_incoming], dim=1)
+        outgoing = torch.cat([warehouse_outgoing, store_outgoing], dim=1)
+        
+        return incoming, outgoing
+    
+    def message_passing_step(self, nodes, edges, observation):
+        """Perform one step of message passing."""
+        n_stores = self.scenario.problem_params.get('n_stores', 0)
+        
+        # Aggregate messages
+        incoming, outgoing = self.aggregate_messages(edges)
+        
+        # Update nodes
+        node_input = torch.cat([nodes, incoming, outgoing], dim=-1)
+        node_updates = self.net['node_update'](node_input)
+        
+        if self.use_residual_connections:
+            nodes = nodes + node_updates
+        else:
+            nodes = node_updates
+        
+        # Prepare edge sources and targets for edge update
+        supplier_node = torch.zeros_like(nodes[:, :1])
+        warehouse_node = nodes[:, :1]
+        store_nodes = nodes[:, 1:]
+        customer_nodes = torch.zeros_like(store_nodes)
+        
+        edge_sources = torch.cat([
+            supplier_node,  # Supplier -> Warehouse
+            warehouse_node.expand(-1, n_stores, -1),  # Warehouse -> Stores
+            store_nodes,  # Stores -> Customers
+        ], dim=1)
+        
+        edge_targets = torch.cat([
+            warehouse_node,  # Supplier -> Warehouse
+            store_nodes,  # Warehouse -> Stores
+            customer_nodes,  # Stores -> Customers
+        ], dim=1)
+        
+        # Add self-loop if enabled
+        if self.use_self_loops:
+            edge_sources = torch.cat([edge_sources, warehouse_node], dim=1)
+            edge_targets = torch.cat([edge_targets, warehouse_node], dim=1)
+        
+        # Update edges
+        edge_input = torch.cat([edges, edge_sources, edge_targets], dim=-1)
+        edge_updates = self.net['edge_update'](edge_input)
+        
+        if self.use_residual_connections:
+            edges = edges + edge_updates
+        else:
+            edges = edge_updates
+        
+        return nodes, edges
+    
+    def forward(self, observation):
+        """
+        Forward pass through GNN for one warehouse many stores case.
+        """
+        # Create graph network structure from observation
+        graph_network = self.create_graph_network(observation)
+        
+        # Prepare node features
+        all_features = self.prepare_node_features(observation)
+        
+        # Initial node embeddings
+        nodes = self.net['initial_node'](all_features)
+        
+        # Create initial edges
+        edges = self.create_edges(nodes, observation)
+        
+        # Initial edge embeddings
+        edges = self.net['initial_edge'](edges)
+        
+        # Message passing iterations
+        for _ in range(self.num_message_passing_steps):
+            nodes, edges = self.message_passing_step(nodes, edges, observation)
+        
+        # Generate outputs from edges
+        n_stores = self.scenario.problem_params.get('n_stores', 0)
+        warehouse_order = self.net['output'](edges[:, 0:1]).squeeze(-1)
+        store_intermediate = self.net['output'](edges[:, 1:1+n_stores]).squeeze(-1)
+        
+        # Apply proportional allocation for stores based on warehouse inventory
+        if self.use_self_loops:
+            warehouse_self_loop_output = self.net['output'](edges[:, -1:]).squeeze(-1)
+            all_outputs = torch.cat([store_intermediate, warehouse_self_loop_output], dim=1)
+            allocations = self.apply_proportional_allocation(
+                all_outputs, 
+                observation['warehouse_inventories']
+            )
+            store_orders = allocations[:, :-1]
+            self_loop_order = allocations[:, -1:]
+        else:
+            store_orders = self.apply_proportional_allocation(
+                store_intermediate.unsqueeze(-1), 
+                observation['warehouse_inventories']
+            ).squeeze(-1)
+            self_loop_order = torch.zeros_like(warehouse_order.unsqueeze(-1))
+        
+        return {
+            'warehouses': warehouse_order,
+            'stores': store_orders,
+            'warehouse_self_loop_orders': self_loop_order
+        }
+
 
 class NeuralNetworkCreator:
     """
@@ -649,9 +952,17 @@ class NeuralNetworkCreator:
             if val is None:
                 nn_params_copy['output_sizes'][key] = self.set_default_output_size(key, scenario.problem_params)
 
-        model = self.get_architecture(nn_params_copy['name'])(
-            nn_params_copy, 
-            device=device
+        # Special handling for GNN architecture - pass scenario directly
+        if nn_params_copy['name'] == 'gnn':
+            model = self.get_architecture(nn_params_copy['name'])(
+                nn_params_copy,
+                scenario,
+                device=device
+            )
+        else:
+            model = self.get_architecture(nn_params_copy['name'])(
+                nn_params_copy, 
+                device=device
             )
         
         # Calculate warehouse upper bound if specified in config file
