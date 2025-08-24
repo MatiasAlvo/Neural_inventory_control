@@ -609,7 +609,6 @@ class GNN(MyNeuralNetwork):
         self.graph_params = args.get('graph_architecture', {})
         self.num_message_passing_steps = self.graph_params.get('num_message_passing_steps', 2)
         self.aggregation_method = self.graph_params.get('aggregation_method', 'mean')  # mean, sum, max
-        self.use_self_loops = self.graph_params.get('use_self_loops', True)
         self.use_residual_connections = self.graph_params.get('use_residual_connections', True)
         self.edge_feature_dim = self.graph_params.get('edge_feature_dim', 32)
         self.node_feature_dim = self.graph_params.get('node_feature_dim', 32)
@@ -751,13 +750,78 @@ class GNN(MyNeuralNetwork):
         # Single concatenation - already in order: [echelons?, warehouse, stores]
         all_features = torch.cat(padded_features, dim=1)
         
+        # Create lead time matrix matching adjacency structure
+        lead_time_matrix = self._create_lead_time_matrix(adjacency, has_outside_supplier, observation)
+        
         graph_network = {
             'adjacency': adjacency,
             'has_outside_supplier': has_outside_supplier,
-            'has_demand': has_demand
+            'has_demand': has_demand,
+            'lead_time_matrix': lead_time_matrix,  # Matrix of lead times matching adjacency
         }
         
         return graph_network, all_features
+    
+    def _create_lead_time_matrix(self, adjacency, has_outside_supplier, observation):
+        """
+        Create a lead time matrix matching the adjacency matrix structure.
+        lead_time_matrix[i, j] = lead time for edge from node i to node j (0 if no edge)
+        """
+        n_nodes = adjacency.size(0)
+        device = adjacency.device
+        lead_time_matrix = torch.zeros(n_nodes, n_nodes, device=device)
+        
+        n_extra_echelons = self.scenario.problem_params.get('n_extra_echelons', 0)
+        n_warehouses = self.scenario.problem_params.get('n_warehouses', 0)
+        n_stores = self.scenario.problem_params.get('n_stores', 0)
+        
+        # Serial network case
+        if n_extra_echelons > 0:
+            # Echelon to echelon lead times
+            for i in range(n_extra_echelons - 1):
+                if adjacency[i, i + 1] > 0:
+                    lead_time_matrix[i, i + 1] = observation['echelon_lead_times'][0, i]
+            
+            # Last echelon to warehouse
+            if n_extra_echelons > 0 and n_warehouses > 0:
+                echelon_idx = n_extra_echelons - 1
+                warehouse_idx = n_extra_echelons
+                if adjacency[echelon_idx, warehouse_idx] > 0:
+                    lead_time_matrix[echelon_idx, warehouse_idx] = observation['echelon_lead_times'][0, echelon_idx]
+            
+            # Warehouse to store
+            if n_warehouses > 0 and n_stores > 0:
+                warehouse_idx = n_extra_echelons
+                store_idx = n_extra_echelons + n_warehouses
+                if adjacency[warehouse_idx, store_idx] > 0:
+                    lead_time_matrix[warehouse_idx, store_idx] = observation['warehouse_lead_times'][0, 0]
+        
+        # Warehouse-store network case
+        else:
+            for w_idx in range(n_warehouses):
+                for s_idx in range(n_stores):
+                    if adjacency[w_idx, n_warehouses + s_idx] > 0:
+                        lead_time_matrix[w_idx, n_warehouses + s_idx] = observation['lead_times'][0, s_idx]
+        
+        # Add a row for virtual supplier lead times (we'll handle this in create_edges)
+        # For nodes that connect to outside suppliers, store their lead times
+        supplier_lead_times = torch.zeros(n_nodes, device=device)
+        if n_extra_echelons > 0 and has_outside_supplier[0] > 0:
+            # First echelon gets from supplier
+            supplier_lead_times[0] = observation['echelon_lead_times'][0, 0]
+        else:
+            # Warehouses get from suppliers
+            for w_idx in range(n_warehouses):
+                if has_outside_supplier[w_idx] > 0:
+                    supplier_lead_times[w_idx] = observation['warehouse_lead_times'][0, w_idx]
+        
+        # Store supplier lead times as an additional attribute
+        lead_time_matrix = {
+            'matrix': lead_time_matrix,
+            'supplier_lead_times': supplier_lead_times
+        }
+        
+        return lead_time_matrix
     
     def _pad_features(self, tensor, inv_len, max_inv_len, max_states_len):
         """Helper to pad inventory and state features to uniform size."""
@@ -769,47 +833,85 @@ class GNN(MyNeuralNetwork):
         ], dim=2)
     
     
-    def create_edges(self, nodes, observation):
-        """Create edge features for the supply chain graph."""
-        n_stores = self.scenario.problem_params.get('n_stores', 0)
+    def create_edges(self, graph_network, nodes):
+        """
+        Create edge features for the supply chain graph based on adjacency matrix.
         
-        # Virtual supplier node
-        supplier_node = torch.zeros_like(nodes[:, :1])
-        warehouse_node = nodes[:, :1]
-        store_nodes = nodes[:, 1:]
+        Args:
+            graph_network: Dictionary with adjacency, lead times, and node flags
+            nodes: Node embeddings tensor
+            
+        Returns:
+            edges: Tensor of edge features [batch_size, num_edges, edge_feature_dim]
+        """
+        adjacency = graph_network['adjacency']
+        has_outside_supplier = graph_network['has_outside_supplier']
+        has_demand = graph_network['has_demand']
+        lead_time_info = graph_network['lead_time_matrix']
+        lead_time_matrix = lead_time_info['matrix']
+        supplier_lead_times = lead_time_info['supplier_lead_times']
         
-        # Edge 1: Supplier -> Warehouse
-        warehouse_lead = observation['warehouse_lead_times'].unsqueeze(-1)
-        supplier_warehouse_edge = torch.cat([
-            supplier_node, warehouse_node, warehouse_lead
-        ], dim=-1)
+        batch_size = nodes.size(0)
+        device = nodes.device
         
-        # Edge 2: Warehouse -> Stores
-        warehouse_expanded = warehouse_node.expand(-1, n_stores, -1)
-        store_leads = observation['lead_times'].unsqueeze(-1)
-        warehouse_store_edges = torch.cat([
-            warehouse_expanded, store_nodes, store_leads
-        ], dim=-1)
+        edge_list = []
         
-        # Edge 3: Stores -> Customers
-        customer_nodes = torch.zeros_like(store_nodes)
-        customer_leads = torch.zeros_like(store_leads)
-        store_customer_edges = torch.cat([
-            store_nodes, customer_nodes, customer_leads
-        ], dim=-1)
+        # Create edges from adjacency matrix
+        # Find all edges (i, j) where adjacency[i, j] = 1
+        # This represents directed edges: source node i → target node j
+        edge_indices = adjacency.nonzero(as_tuple=False)  # [num_edges, 2]
         
-        # Combine all edges
-        all_edges = [supplier_warehouse_edge, warehouse_store_edges, store_customer_edges]
+        # Extract source and target node indices for each directed edge
+        source_indices = edge_indices[:, 0]  # Source nodes (suppliers)
+        target_indices = edge_indices[:, 1]  # Target nodes (recipients)
         
-        # Add self-loops if enabled
-        if self.use_self_loops:
-            warehouse_self_loop = torch.cat([
-                warehouse_node, warehouse_node, 
-                torch.zeros_like(warehouse_lead)
-            ], dim=-1)
-            all_edges.append(warehouse_self_loop)
+        # Get node features for all batches at once
+        source_features = nodes[:, source_indices]  # [batch_size, num_edges, node_dim]
+        target_features = nodes[:, target_indices]  # [batch_size, num_edges, node_dim]
         
-        edges = torch.cat(all_edges, dim=1)
+        # Extract lead times from the matrix for each edge
+        edge_lead_times = lead_time_matrix[source_indices, target_indices].unsqueeze(-1)  # [num_edges, 1]
+        edge_lead_times = edge_lead_times.unsqueeze(0).expand(batch_size, -1, -1)  # [batch_size, num_edges, 1]
+        
+        # Concatenate source, target, and lead time features
+        batch_edges = torch.cat([source_features, target_features, edge_lead_times], dim=-1)
+        edge_list.append(batch_edges)
+        
+        # Create edges from outside suppliers (virtual supplier nodes)
+        supplier_nodes = has_outside_supplier.nonzero(as_tuple=False).squeeze(-1)
+        # Virtual supplier node features (zeros) for all batches
+        supplier_features = torch.zeros(batch_size, supplier_nodes.size(0), nodes.size(-1), device=device)
+        target_features = nodes[:, supplier_nodes]
+        
+        # Get supplier lead times from the stored vector
+        lead_times = supplier_lead_times[supplier_nodes].unsqueeze(-1)  # [num_supplier_nodes, 1]
+        lead_times = lead_times.unsqueeze(0).expand(batch_size, -1, -1)  # [batch_size, num_supplier_nodes, 1]
+        
+        supplier_edges = torch.cat([supplier_features, target_features, lead_times], dim=-1)
+        edge_list.append(supplier_edges)
+        
+        # Create edges to customers (demand nodes)
+        demand_nodes = has_demand.nonzero(as_tuple=False).squeeze(-1)
+        source_features = nodes[:, demand_nodes]
+        # Virtual customer node features (zeros) for all batches
+        customer_features = torch.zeros(batch_size, demand_nodes.size(0), nodes.size(-1), device=device)
+        customer_lead_times = torch.zeros(batch_size, demand_nodes.size(0), 1, device=device)
+        
+        customer_edges = torch.cat([source_features, customer_features, customer_lead_times], dim=-1)
+        edge_list.append(customer_edges)
+        
+        # Add self-loops for nodes that supply to others
+        # Nodes with outgoing edges (excluding edges to customers)
+        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+        if supplying_nodes.size(0) > 0:
+            node_features = nodes[:, supplying_nodes]
+            self_loop_lead_times = torch.zeros(batch_size, supplying_nodes.size(0), 1, device=device)
+            
+            self_loops = torch.cat([node_features, node_features, self_loop_lead_times], dim=-1)
+            edge_list.append(self_loops)
+        
+        # Concatenate all edges
+        edges = torch.cat(edge_list, dim=1)
         return edges
     
     def aggregate_messages(self, edges):
@@ -818,10 +920,7 @@ class GNN(MyNeuralNetwork):
         
         # Incoming messages aggregation
         # Warehouse gets messages from supplier edge and self-loop
-        if self.use_self_loops:
-            warehouse_incoming = (edges[:, 0:1] + edges[:, -1:]) / math.sqrt(2)
-        else:
-            warehouse_incoming = edges[:, 0:1]
+        warehouse_incoming = (edges[:, 0:1] + edges[:, -1:]) / math.sqrt(2)
         
         # Stores get messages from warehouse edges
         store_incoming = edges[:, 1:1+n_stores]
@@ -835,8 +934,7 @@ class GNN(MyNeuralNetwork):
         elif self.aggregation_method == 'max':
             warehouse_outgoing = edges[:, 1:1+n_stores].max(dim=1)[0].unsqueeze(1)
         
-        if self.use_self_loops:
-            warehouse_outgoing = (warehouse_outgoing + edges[:, -1:]) / math.sqrt(2)
+        warehouse_outgoing = (warehouse_outgoing + edges[:, -1:]) / math.sqrt(2)
         
         # Stores send to customers
         store_outgoing = edges[:, 1+n_stores:1+2*n_stores]
@@ -907,8 +1005,8 @@ class GNN(MyNeuralNetwork):
         # Initial node embeddings
         nodes = self.net['initial_node'](all_features)
         
-        # Create initial edges
-        edges = self.create_edges(nodes, observation)
+        # Create initial edges using graph network structure
+        edges = self.create_edges(graph_network, nodes)
         
         # Initial edge embeddings
         edges = self.net['initial_edge'](edges)
