@@ -745,11 +745,20 @@ class GNN(MyNeuralNetwork):
         # Create lead time matrix matching adjacency structure
         lead_time_matrix = self._create_lead_time_matrix(adjacency, has_outside_supplier, observation)
         
+        # Determine number of message passing steps based on network topology
+        if n_extra_echelons > 0:
+            # Serial network: n_echelons + 1 (for warehouse-store connection)
+            num_message_passing = n_extra_echelons + 1
+        else:
+            # Warehouse-store network: 1 step
+            num_message_passing = 1
+        
         graph_network = {
             'adjacency': adjacency,
             'has_outside_supplier': has_outside_supplier,
             'has_demand': has_demand,
             'lead_time_matrix': lead_time_matrix,  # Matrix of lead times matching adjacency
+            'num_message_passing': num_message_passing,  # Number of message passing iterations
         }
         
         return graph_network, all_features
@@ -993,8 +1002,9 @@ class GNN(MyNeuralNetwork):
         # Initial edge embeddings
         edges = self.net['initial_edge'](edge_features)
         
-        # Message passing iterations (default: 2 steps)
-        for _ in range(2):
+        # Message passing iterations
+        num_message_passing = graph_network['num_message_passing']
+        for _ in range(num_message_passing):
             nodes, edges = self.message_passing_step(nodes, edges)
         
         # Generate outputs from edges
