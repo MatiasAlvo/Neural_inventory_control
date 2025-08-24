@@ -1,0 +1,104 @@
+seeds : 
+  'underage_cost': 28 
+  'holding_cost': 73 
+  'mean': 33
+  'coef_of_var': 92 
+  'lead_time': 41 
+  'demand': 57 
+  'initial_inventory': 4839
+
+test_seeds :  # Seeds for test set
+  'underage_cost': 28 
+  'holding_cost': 73 
+  'mean': 33 
+  'coef_of_var': 92
+  'lead_time': 41
+  'demand': 65
+  'initial_inventory': 4839
+
+sample_data_params:
+  'split_by_period': False
+
+problem_params : 
+  'n_stores': 10  # Tested values: 3, 5, 10, 20, 30, 50
+  'n_warehouses': 2  # Multi-warehouse configuration
+  'n_extra_echelons': 0
+  'lost_demand': True
+  'maximize_profit': False
+  # Adjacency matrix defining warehouse-store connections
+  # Rows: warehouses, Columns: stores
+  # 1 = connected, 0 = not connected
+  'warehouse_store_adjacency': [
+    [0, 0, 1, 1, 1, 0, 1, 1, 1, 0],  # Warehouse 0 connections
+    [1, 1, 1, 1, 1, 1, 0, 1, 1, 1]   # Warehouse 1 connections
+  ]
+
+params_by_dataset : 
+  'train': 
+    'n_samples': 8192  # Tested values: 16, 256, 8192 for vanilla and symmetry-aware (for sym-aware, additionally 2, 4, 8)
+    'batch_size': 1024 
+    'periods': 50 
+    'ignore_periods': 30 
+  'dev': 
+    'n_samples': 8192 
+    'batch_size': 8192 
+    'periods': 100 
+    'ignore_periods': 60 
+  'test': 
+    'n_samples': 8192 
+    'batch_size': 8192 
+    'periods': 5000 
+    'ignore_periods': 3000
+
+observation_params:
+  'include_warehouse_inventory': True
+  'include_static_features':
+    'holding_costs': True 
+    'underage_costs': True 
+    'lead_times': True 
+    'mean': True 
+    'std': True 
+  'demand': 
+    'past_periods': 0 
+    'period_shift': 0
+  'include_days_to_christmas': False
+
+store_params: 
+  'demand': 
+    'sample_across_stores': True
+    'mean_range': [2.5, 7.5]
+    'coef_of_var_range': [0.25, 0.50]
+    'distribution': 'normal'
+    'correlation': 0.5
+    'clip': True
+    'decimals': 3
+  'lead_time': 
+    'sample_across_stores': True
+    'vary_across_samples': False
+    'expand': False
+    'range': [2, 4] # Recall that upper range is excluded from the possible values
+  'holding_cost': 
+    'sample_across_stores': True 
+    'vary_across_samples': False
+    'expand': False
+    'range': [0.7, 1.3]
+  'underage_cost': 
+    'sample_across_stores': True
+    'vary_across_samples': False 
+    'expand': False
+    'range': [6.3, 11.7]
+  'initial_inventory': 
+    'sample': True
+    'range_mult': [0, 1]
+    'inventory_periods': 3
+
+warehouse_params: 
+  # For single warehouse, use scalar values:
+  # 'holding_cost': 0.3
+  # 'lead_time': 3
+  # For multiple warehouses, can use lists or uniform values:
+  'holding_cost': [0.3, 0.35]  # Different costs for each warehouse
+  'lead_time': 3  # Same lead time for all warehouses     
+
+echelon_params: 
+  null

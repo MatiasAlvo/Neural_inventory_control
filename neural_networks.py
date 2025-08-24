@@ -641,9 +641,9 @@ class GNN(MyNeuralNetwork):
             # Serial network: echelons -> warehouse -> store
             # Node ordering: [echelon_0, echelon_1, ..., warehouse, store]
             n_nodes = n_extra_echelons + n_warehouses + n_stores
-            adjacency = torch.zeros(n_nodes, n_nodes, dtype=torch.int32, device=device)
-            has_outside_supplier = torch.zeros(n_nodes, dtype=torch.int32, device=device)
-            has_demand = torch.zeros(n_nodes, dtype=torch.int32, device=device)
+            adjacency = torch.zeros(n_nodes, n_nodes, dtype=torch.float32, device=device)
+            has_outside_supplier = torch.zeros(n_nodes, dtype=torch.float32, device=device)
+            has_demand = torch.zeros(n_nodes, dtype=torch.float32, device=device)
             
             # Define node indices
             warehouse_idx = n_extra_echelons
@@ -664,6 +664,43 @@ class GNN(MyNeuralNetwork):
             
             # Store connects to demand
             has_demand[store_idx] = 1
+            
+        # Warehouse-stores network case (no extra echelons)
+        elif n_warehouses > 0 and n_stores > 0:
+            # Node ordering: [warehouse_0, warehouse_1, ..., store_0, store_1, ...]
+            n_nodes = n_warehouses + n_stores
+            adjacency = torch.zeros(n_nodes, n_nodes, dtype=torch.float32, device=device)
+            has_outside_supplier = torch.zeros(n_nodes, dtype=torch.float32, device=device)
+            has_demand = torch.zeros(n_nodes, dtype=torch.float32, device=device)
+            
+            # All warehouses connect to outside supplier
+            has_outside_supplier[:n_warehouses] = 1
+            
+            # All stores connect to demand
+            has_demand[n_warehouses:] = 1
+            
+            if n_warehouses == 1:
+                # Single warehouse case: all stores connect to the single warehouse
+                # Create connections from warehouse to all stores
+                for store_idx in range(n_stores):
+                    adjacency[0, n_warehouses + store_idx] = 1
+            else:
+                # Multiple warehouses case: use adjacency matrix from config
+                warehouse_store_adjacency = problem_params.get('warehouse_store_adjacency', None)
+                
+                if warehouse_store_adjacency is None:
+                    raise ValueError(
+                        f"Multiple warehouses ({n_warehouses}) detected but no 'warehouse_store_adjacency' "
+                        f"matrix found in problem_params. Please specify which stores connect to which warehouses."
+                    )
+                
+                # Convert list/array to tensor
+                warehouse_store_adjacency = torch.tensor(warehouse_store_adjacency, dtype=torch.float32, device=device)
+                
+                # Copy the warehouse-store connections into the full adjacency matrix
+                # Warehouse nodes are indices [0, n_warehouses)
+                # Store nodes are indices [n_warehouses, n_warehouses + n_stores)
+                adjacency[:n_warehouses, n_warehouses:] = warehouse_store_adjacency
         
         graph_network = {
             'adjacency': adjacency,
@@ -795,7 +832,7 @@ class GNN(MyNeuralNetwork):
         
         return incoming, outgoing
     
-    def message_passing_step(self, nodes, edges, observation):
+    def message_passing_step(self, nodes, edges):
         """Perform one step of message passing."""
         n_stores = self.scenario.problem_params.get('n_stores', 0)
         
@@ -850,7 +887,8 @@ class GNN(MyNeuralNetwork):
         Forward pass through GNN for one warehouse many stores case.
         """
         # Create graph network structure from observation
-        graph_network = self.create_graph_network(observation)
+        # This stores the adjacency matrix and node metadata for the GNN
+        _ = self.create_graph_network(observation)  # Currently for validation, could be used for dynamic routing
         
         # Prepare node features
         all_features = self.prepare_node_features(observation)
@@ -866,7 +904,7 @@ class GNN(MyNeuralNetwork):
         
         # Message passing iterations
         for _ in range(self.num_message_passing_steps):
-            nodes, edges = self.message_passing_step(nodes, edges, observation)
+            nodes, edges = self.message_passing_step(nodes, edges)
         
         # Generate outputs from edges
         n_stores = self.scenario.problem_params.get('n_stores', 0)
