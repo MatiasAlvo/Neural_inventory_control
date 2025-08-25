@@ -73,10 +73,22 @@ store_params:
     'clip': True
     'decimals': 3
   'lead_time': 
-    'sample_across_stores': True
+    'sample_across_stores': False
     'vary_across_samples': False
-    'expand': False
-    'range': [2, 4] # Recall that upper range is excluded from the possible values
+    'expand': True  # This will create a [n_stores, n_warehouses] matrix
+    'value': [
+      # For each store, lead times from [warehouse_0, warehouse_1]
+      [0, 2],  # Store 0: no connection to W0 (0), 2 from W1
+      [0, 1],  # Store 1: no connection to W0 (0), 1 from W1
+      [6, 2],  # Store 2: 6 from W0, 2 from W1
+      [6, 2],  # Store 3: 6 from W0, 2 from W1
+      [6, 1],  # Store 4: 6 from W0, 1 from W1
+      [0, 2],  # Store 5: no connection to W0 (0), 2 from W1
+      [6, 0],  # Store 6: 6 from W0, no connection to W1 (0)
+      [5, 2],  # Store 7: 5 from W0, 2 from W1
+      [6, 2],  # Store 8: 6 from W0, 2 from W1
+      [0, 2]   # Store 9: no connection to W0 (0), 2 from W1
+    ]
   'holding_cost': 
     'sample_across_stores': True 
     'vary_across_samples': False
