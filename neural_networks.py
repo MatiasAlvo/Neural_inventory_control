@@ -838,6 +838,12 @@ class GNN(MyNeuralNetwork):
         """
         Create edge features for the supply chain graph based on adjacency matrix.
         
+        Edge ordering in the returned tensor:
+        1. Internal edges (from adjacency matrix) - connections between network nodes
+        2. Supplier edges - from virtual supplier nodes to nodes receiving external supply
+        3. Demand edges - from nodes serving demand to virtual customer nodes
+        4. Self-loops - for nodes that supply to other nodes
+        
         Args:
             graph_network: Dictionary with adjacency, lead times, and node flags
             nodes: Node embeddings tensor
@@ -915,38 +921,126 @@ class GNN(MyNeuralNetwork):
         edge_features = torch.cat(edge_list, dim=1)
         return edge_features
     
-    def aggregate_messages(self, edges):
-        """Aggregate messages for nodes based on aggregation method."""
-        n_stores = self.scenario.problem_params.get('n_stores', 0)
+    def aggregate_messages(self, graph_network, edges):
+        """
+        Aggregate messages for nodes based on graph structure.
         
-        # Incoming messages aggregation
-        # Warehouse gets messages from supplier edge and self-loop
-        warehouse_incoming = (edges[:, 0:1] + edges[:, -1:]) / math.sqrt(2)
+        Assumes edges are ordered as: internal, supplier, demand, self-loops
+        (as created by create_edge_features method)
         
-        # Stores get messages from warehouse edges
-        store_incoming = edges[:, 1:1+n_stores]
+        Args:
+            graph_network: Dictionary with graph structure information
+            edges: Edge embeddings to aggregate
+            
+        Returns:
+            incoming: Aggregated incoming messages for each node
+            outgoing: Aggregated outgoing messages for each node
+        """
+        adjacency = graph_network['adjacency']
+        has_outside_supplier = graph_network['has_outside_supplier']
+        has_demand = graph_network['has_demand']
         
-        # Outgoing messages aggregation  
-        # Warehouse sends to stores (using mean aggregation)
-        warehouse_outgoing = edges[:, 1:1+n_stores].mean(dim=1, keepdim=True)
+        n_nodes = adjacency.size(0)
+        batch_size = edges.size(0)
+        edge_dim = edges.size(-1)
+        device = edges.device
         
-        warehouse_outgoing = (warehouse_outgoing + edges[:, -1:]) / math.sqrt(2)
+        # Initialize message tensors for each node
+        incoming = torch.zeros(batch_size, n_nodes, edge_dim, device=device)
+        outgoing = torch.zeros(batch_size, n_nodes, edge_dim, device=device)
         
-        # Stores send to customers
-        store_outgoing = edges[:, 1+n_stores:1+2*n_stores]
+        edge_idx = 0
         
-        # Combine aggregated messages
-        incoming = torch.cat([warehouse_incoming, store_incoming], dim=1)
-        outgoing = torch.cat([warehouse_outgoing, store_outgoing], dim=1)
+        # Aggregate messages from internal edges (adjacency matrix)
+        edge_indices = adjacency.nonzero(as_tuple=False)
+        n_internal_edges = edge_indices.size(0)
+        internal_edges = edges[:, edge_idx:edge_idx+n_internal_edges]
+        
+        for i, (src, tgt) in enumerate(edge_indices):
+            # Incoming: target node receives from source
+            incoming[:, tgt] += internal_edges[:, i]
+            # Outgoing: source node sends to target
+            outgoing[:, src] += internal_edges[:, i]
+        
+        edge_idx += n_internal_edges
+        
+        # Aggregate messages from supplier edges
+        supplier_nodes = has_outside_supplier.nonzero(as_tuple=False).squeeze(-1)
+        n_supplier_edges = supplier_nodes.size(0)
+        supplier_edges = edges[:, edge_idx:edge_idx+n_supplier_edges]
+        
+        for i, node_idx in enumerate(supplier_nodes):
+            # Nodes receive from suppliers
+            incoming[:, node_idx] += supplier_edges[:, i]
+        
+        edge_idx += n_supplier_edges
+        
+        # Aggregate messages from demand edges
+        demand_nodes = has_demand.nonzero(as_tuple=False).squeeze(-1)
+        n_demand_edges = demand_nodes.size(0)
+        demand_edges = edges[:, edge_idx:edge_idx+n_demand_edges]
+        
+        for i, node_idx in enumerate(demand_nodes):
+            # Nodes send to customers
+            outgoing[:, node_idx] += demand_edges[:, i]
+        
+        edge_idx += n_demand_edges
+        
+        # Aggregate messages from self-loops
+        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+        if supplying_nodes.size(0) > 0:
+            n_self_loops = supplying_nodes.size(0)
+            self_loop_edges = edges[:, edge_idx:edge_idx+n_self_loops]
+            
+            for i, node_idx in enumerate(supplying_nodes):
+                # Self-loops contribute to both incoming and outgoing
+                incoming[:, node_idx] += self_loop_edges[:, i]
+                outgoing[:, node_idx] += self_loop_edges[:, i]
+        
+        # Normalize aggregated messages by number of connections
+        # Count incoming connections for each node
+        in_degree = adjacency.sum(dim=0).float()  # How many nodes send to this node
+        in_degree += has_outside_supplier.float()  # Add supplier connections
+        
+        # Add self-loops to in-degree for supplying nodes
+        for node_idx in supplying_nodes:
+            in_degree[node_idx] += 1
+        
+        # Count outgoing connections for each node
+        out_degree = adjacency.sum(dim=1).float()  # How many nodes this node sends to
+        out_degree += has_demand.float()  # Add customer connections
+        
+        # Add self-loops to out-degree for supplying nodes
+        for node_idx in supplying_nodes:
+            out_degree[node_idx] += 1
+        
+        # Normalize (avoid division by zero)
+        in_degree = torch.where(in_degree > 0, in_degree, torch.ones_like(in_degree))
+        out_degree = torch.where(out_degree > 0, out_degree, torch.ones_like(out_degree))
+        
+        incoming = incoming / torch.sqrt(in_degree).unsqueeze(0).unsqueeze(-1)
+        outgoing = outgoing / torch.sqrt(out_degree).unsqueeze(0).unsqueeze(-1)
         
         return incoming, outgoing
     
-    def message_passing_step(self, nodes, edges):
-        """Perform one step of message passing."""
-        n_stores = self.scenario.problem_params.get('n_stores', 0)
+    def message_passing_step(self, graph_network, nodes, edges):
+        """
+        Perform one step of message passing using graph structure.
         
-        # Aggregate messages
-        incoming, outgoing = self.aggregate_messages(edges)
+        Args:
+            graph_network: Dictionary with graph structure information
+            nodes: Current node embeddings
+            edges: Current edge embeddings
+            
+        Returns:
+            Updated nodes and edges
+        """
+        adjacency = graph_network['adjacency']
+        has_outside_supplier = graph_network['has_outside_supplier']
+        has_demand = graph_network['has_demand']
+        
+        # Aggregate messages based on graph structure
+        incoming, outgoing = self.aggregate_messages(graph_network, edges)
         
         # Update nodes
         node_input = torch.cat([nodes, incoming, outgoing], dim=-1)
@@ -955,30 +1049,40 @@ class GNN(MyNeuralNetwork):
         # Apply residual connections
         nodes = nodes + node_updates
         
-        # Prepare edge sources and targets for edge update
-        supplier_node = torch.zeros_like(nodes[:, :1])
-        warehouse_node = nodes[:, :1]
-        store_nodes = nodes[:, 1:]
-        customer_nodes = torch.zeros_like(store_nodes)
+        # Reconstruct edge source and target features for edge update
+        edge_sources = []
+        edge_targets = []
+        device = nodes.device
         
-        edge_sources = torch.cat([
-            supplier_node,  # Supplier -> Warehouse
-            warehouse_node.expand(-1, n_stores, -1),  # Warehouse -> Stores
-            store_nodes,  # Stores -> Customers
-        ], dim=1)
+        # Internal edges from adjacency matrix
+        edge_indices = adjacency.nonzero(as_tuple=False)
+        source_indices = edge_indices[:, 0]
+        target_indices = edge_indices[:, 1]
+        edge_sources.append(nodes[:, source_indices])
+        edge_targets.append(nodes[:, target_indices])
         
-        edge_targets = torch.cat([
-            warehouse_node,  # Supplier -> Warehouse
-            store_nodes,  # Warehouse -> Stores
-            customer_nodes,  # Stores -> Customers
-        ], dim=1)
+        # Supplier edges
+        supplier_nodes = has_outside_supplier.nonzero(as_tuple=False).squeeze(-1)
+        edge_sources.append(torch.zeros(nodes.size(0), supplier_nodes.size(0), nodes.size(-1), device=device))
+        edge_targets.append(nodes[:, supplier_nodes])
         
-        # Add self-loop
-        edge_sources = torch.cat([edge_sources, warehouse_node], dim=1)
-        edge_targets = torch.cat([edge_targets, warehouse_node], dim=1)
+        # Demand edges
+        demand_nodes = has_demand.nonzero(as_tuple=False).squeeze(-1)
+        edge_sources.append(nodes[:, demand_nodes])
+        edge_targets.append(torch.zeros(nodes.size(0), demand_nodes.size(0), nodes.size(-1), device=device))
+        
+        # Self-loops for nodes with outgoing edges
+        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+        if supplying_nodes.size(0) > 0:
+            edge_sources.append(nodes[:, supplying_nodes])
+            edge_targets.append(nodes[:, supplying_nodes])
+        
+        # Concatenate all edge sources and targets
+        all_edge_sources = torch.cat(edge_sources, dim=1)
+        all_edge_targets = torch.cat(edge_targets, dim=1)
         
         # Update edges
-        edge_input = torch.cat([edges, edge_sources, edge_targets], dim=-1)
+        edge_input = torch.cat([edges, all_edge_sources, all_edge_targets], dim=-1)
         edge_updates = self.net['edge_update'](edge_input)
         
         # Apply residual connections
@@ -1005,7 +1109,7 @@ class GNN(MyNeuralNetwork):
         # Message passing iterations
         num_message_passing = graph_network['num_message_passing']
         for _ in range(num_message_passing):
-            nodes, edges = self.message_passing_step(nodes, edges)
+            nodes, edges = self.message_passing_step(graph_network, nodes, edges)
         
         # Generate outputs from edges
         n_stores = self.scenario.problem_params.get('n_stores', 0)
