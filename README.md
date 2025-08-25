@@ -100,11 +100,10 @@ The policy classes we consider are the following:
 - `data_driven_net`: Defines a direct mapping from time-series data (previous demands) and current inventory on-hand to an order amount. In our paper, we refer to it as HDPO (end-to-end) in the section "HDPO with real time series data". This policy class can be modified to utilize a different set of features.
 - `echelon_stock`: Echelon stock policy (optimal for a serial system under a backlogged demand assumption).
 - `fixed_quantile`: Generalized newsvendor policy, that utilizes the same quantile for each scenario.
-- `gnn`: Graph Neural Network for one warehouse many stores settings, using message passing between nodes.
+- `gnn`: Graph Neural Network for multi-warehouse and serial system settings, using message passing between nodes to model supply chain dynamics. Supports flexible network topologies defined by adjacency matrices.
 - `just_in_time`: Non-admissible oracle policy, that looks into the future and orders to precisely meet future demand.
 - `quantile_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]).
 - `returns_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]), but allows for negative orders. It defines a non-admissible policy.
-- `symmetry_aware`: Symmetry-aware neural network for settings with one warehouse and many stores.
 - `transformed_nv`: Generalized newsvendor policy, that considers a flexible mapping from newsvendor quantile (p/[p+h]) to a new quantile. This quantile is therefore different across scenarios, but fixed across time for each scenario.
 - `vanilla_one_store`: Vanilla neural network for settings with one store and no warehouse.
 - `vanilla_one_warehouse`: Vanilla neural network for settings with one warehouse and many stores.

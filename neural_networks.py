@@ -394,60 +394,6 @@ class VanillaOneWarehouse(MyNeuralNetwork):
             'warehouses': warehouse_allocation.unsqueeze(2)
             }
 
-class SymmetryAware(MyNeuralNetwork):
-    """
-    Symmetry-aware neural network for settings with one warehouse and many stores
-    """
-
-    def forward(self, observation):
-        """
-        Use store and warehouse inventories and output a context vector.
-        Then, use the context vector alongside warehouse/store local state to output intermediate outputs for warehouses/store.
-        For stores, interpret intermediate outputs as ordered, and apply proportional allocation whenever inventory is scarce.
-        For warehouses, apply sigmoid to intermediate outputs and multiply by warehouse upper bound.
-        """
-
-        # Get tensor of store parameters
-        store_inventories, warehouse_inventories = observation['store_inventories'], observation['warehouse_inventories']
-        # Lead times are 3D [batch, n_stores, n_warehouses], use first warehouse
-        lead_times_2d = observation['lead_times'][:, :, 0]
-        store_params = torch.stack([observation[k] for k in ['mean', 'std', 'underage_costs']] + [lead_times_2d], dim=2)
-        
-        # Get context vector using local state (and without using local parameters)
-        input_tensor = self.flatten_then_concatenate_tensors([store_inventories, warehouse_inventories])
-        context = self.net['context'](input_tensor)
-
-        # Concatenate context vector to warehouselocal state, and get intermediate outputs
-        warehouses_and_context = \
-                self.concatenate_signal_to_object_state_tensor(warehouse_inventories, context)
-        warehouse_intermediate_outputs = self.net['warehouse'](warehouses_and_context)[:, :, 0]
-
-        # Concatenate context vector to each store's local state and parameters, and get intermediate outputs
-        store_inventory_and_params = torch.concat([store_inventories, store_params], dim=2)
-        stores_and_context = \
-                self.concatenate_signal_to_object_state_tensor(store_inventory_and_params, context)
-        store_intermediate_outputs = self.net['store'](stores_and_context)[:, :, 0]  # third dimension has length 1, so we remove it
-
-        # Apply proportional allocation whenever inventory at the warehouse is scarce.
-        store_allocation = self.apply_proportional_allocation(
-            store_intermediate_outputs, 
-            warehouse_inventories
-            )
-
-        # Apply sigmoid to warehouse intermediate outputs and multiply by warehouse upper bound        
-        # Sigmoid is applied if specified in the config file!
-        warehouse_allocation = warehouse_intermediate_outputs*(self.warehouse_upper_bound.unsqueeze(1))
-
-        # Reshape store_allocation to [batch, n_stores, n_warehouses] for consistency
-        # n_warehouses = 1 for SymmetryAware
-        store_allocation = store_allocation.unsqueeze(2)  # [batch, n_stores, 1]
-        
-        return {
-            'stores': store_allocation, 
-            'warehouses': warehouse_allocation.unsqueeze(2)
-            }
-
-    
 class VanillaTransshipment(VanillaOneWarehouse):
     """
     Fully connected neural network for setting with one transshipment center (that cannot hold inventory) and many stores
@@ -765,6 +711,8 @@ class GNN(MyNeuralNetwork):
             observation['store_inventories'],
             observation['holding_costs'].unsqueeze(-1),
             observation['underage_costs'].unsqueeze(-1),
+            observation['mean'].unsqueeze(-1),
+            observation['std'].unsqueeze(-1),
         ], dim=-1)
         features_list.append(store_features)
         inv_lengths.append(store_inv_len)
@@ -1392,7 +1340,6 @@ class NeuralNetworkCreator:
             'vanilla_serial': VanillaSerial,
             'vanilla_transshipment': VanillaTransshipment,
             'vanilla_one_warehouse': VanillaOneWarehouse,
-            'symmetry_aware': SymmetryAware,
             'data_driven': DataDrivenNet,
             'transformed_nv': TransformedNV,
             'fixed_quantile': FixedQuantile,
