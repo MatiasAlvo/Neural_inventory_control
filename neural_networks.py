@@ -211,7 +211,7 @@ class VanillaOneStore(MyNeuralNetwork):
         x = self.net['master'](x) + 1
         x = self.activation_functions['softplus'](x)
 
-        return {'stores': x}
+        return {'stores': x.unsqueeze(2)}
 
 class BaseStock(MyNeuralNetwork):
     """
@@ -226,7 +226,7 @@ class BaseStock(MyNeuralNetwork):
         x = observation['store_inventories']
         inv_pos = x.sum(dim=2)
         x = self.net['master'](torch.tensor([0.0]).to(self.device))  # Constant base stock level
-        return {'stores': torch.clip(x - inv_pos, min=0)} # Clip output to be non-negative
+        return {'stores': torch.clip(x - inv_pos, min=0).unsqueeze(2)}
 
 class EchelonStock(MyNeuralNetwork):
     """
@@ -283,10 +283,14 @@ class EchelonStock(MyNeuralNetwork):
         # print(f'stacked_inv_on_hand.shape: {shifted_inv_on_hand.shape}')
         # print()
 
+        stores_alloc = allocations[:, -1:].unsqueeze(2)
+        warehouses_alloc = allocations[:, -2: -1].unsqueeze(2)
+        echelons_alloc = allocations[:, : n_extra_echelons].unsqueeze(2)
+
         return {
-            'stores': allocations[:, -1:],
-            'warehouses': allocations[:, -2: -1],
-            'echelons': allocations[:, : n_extra_echelons],
+            'stores': stores_alloc,
+            'warehouses': warehouses_alloc,
+            'echelons': echelons_alloc,
                 } 
 
 class CappedBaseStock(MyNeuralNetwork):
@@ -304,7 +308,7 @@ class CappedBaseStock(MyNeuralNetwork):
         x = self.net['master'](torch.tensor([0.0]).to(self.device))  # Constant base stock level
         base_level, cap = x[0], x[1]  # We interpret first input as base level, and second output as cap on the order
         
-        return {'stores': torch.clip(base_level - inv_pos, min=torch.tensor([0.0]).to(self.device), max=cap)} # Clip output to be non-negative
+        return {'stores': torch.clip(base_level - inv_pos, min=torch.tensor([0.0]).to(self.device), max=cap).unsqueeze(2)}
 
 
 class VanillaSerial(MyNeuralNetwork):
@@ -340,11 +344,14 @@ class VanillaSerial(MyNeuralNetwork):
         allocations = self.activation_functions['sigmoid'](x)*shifted_inv_on_hand
         # print(f'allocations[0]: {allocations[0]}')
 
+        stores_alloc = allocations[:, -1:].unsqueeze(2)
+        warehouses_alloc = allocations[:, -2: -1].unsqueeze(2)
+        echelons_alloc = allocations[:, : n_extra_echelons].unsqueeze(2)
 
         return {
-            'stores': allocations[:, -1:],
-            'warehouses': allocations[:, -2: -1],
-            'echelons': allocations[:, : n_extra_echelons],
+            'stores': stores_alloc,
+            'warehouses': warehouses_alloc,
+            'echelons': echelons_alloc,
                 } 
 
 
@@ -384,7 +391,7 @@ class VanillaOneWarehouse(MyNeuralNetwork):
         
         return {
             'stores': store_allocation, 
-            'warehouses': warehouse_allocation
+            'warehouses': warehouse_allocation.unsqueeze(2)
             }
 
 class SymmetryAware(MyNeuralNetwork):
@@ -437,7 +444,7 @@ class SymmetryAware(MyNeuralNetwork):
         
         return {
             'stores': store_allocation, 
-            'warehouses': warehouse_allocation
+            'warehouses': warehouse_allocation.unsqueeze(2)
             }
 
     
@@ -468,7 +475,7 @@ class DataDrivenNet(MyNeuralNetwork):
                 [lead_times_2d]
             )
 
-        return {'stores': self.net['master'](input_tensor)} # Clip output to be non-negative
+        return {'stores': self.net['master'](input_tensor).unsqueeze(2)}
 
 class QuantilePolicy(MyNeuralNetwork):
     """
@@ -518,7 +525,7 @@ class QuantilePolicy(MyNeuralNetwork):
         else:
             store_allocation = torch.clip(base_stock_levels - store_inventories.sum(dim=2), min=0)
         
-        return {"stores": store_allocation}
+        return {"stores": store_allocation.unsqueeze(2)}
     
     def compute_desired_quantiles(self, args):
 
@@ -619,7 +626,7 @@ class JustInTime(MyNeuralNetwork):
             ], dim=1
             )
 
-        return {"stores": torch.clip(future_demands, min=0)}
+        return {"stores": torch.clip(future_demands, min=0).unsqueeze(2)}
 
 class GNN(MyNeuralNetwork):
     """
@@ -878,12 +885,9 @@ class GNN(MyNeuralNetwork):
         Create mapping from output types to edge indices based on known edge ordering.
         Edge ordering: internal edges, supplier edges, demand edges, self-loops
         Returns a dict with keys: 'stores', 'warehouses', 'echelons'
+        All values are 2D arrays for consistency
         """
-        mapping = {
-            'stores': [],
-            'warehouses': [],
-            'echelons': [],
-        }
+        mapping = {}
         
         # Count edges to track indices
         edge_indices = adjacency.nonzero(as_tuple=False)
@@ -895,13 +899,16 @@ class GNN(MyNeuralNetwork):
             # Internal edges are in order: echelon-to-echelon edges, then last-echelon-to-warehouse, then warehouse-to-store
             
             # The last internal edge is warehouse-to-store
-            mapping['stores'] = [n_internal_edges - 1]  # Last internal edge
+            # Use 2D structure: [n_stores][n_warehouses] for consistency
+            mapping['stores'] = [[n_internal_edges - 1]]  # Last internal edge
             
             # The second to last internal edge is last-echelon-to-warehouse
-            mapping['warehouses'] = [n_internal_edges - 2]
+            # Use 2D structure: [n_warehouses][suppliers_per_warehouse] for consistency
+            mapping['warehouses'] = [[n_internal_edges - 2]]
             
             # First echelon orders from supplier (first supplier edge after internal edges)
-            mapping['echelons'] = [n_internal_edges]  # First supplier edge
+            # Use 2D structure: [n_extra_echelons][suppliers_per_echelon] for consistency
+            mapping['echelons'] = [[n_internal_edges]]  # First supplier edge
             
         else:
             # Warehouse-stores network
@@ -915,7 +922,8 @@ class GNN(MyNeuralNetwork):
                     mapping['stores'][store_idx].append(i)
             
             # Warehouse orders from suppliers (one supplier edge per warehouse)
-            mapping['warehouses'] = list(range(n_internal_edges, n_internal_edges + n_warehouses))
+            # Use 2D structure: [n_warehouses][suppliers_per_warehouse] for consistency
+            mapping['warehouses'] = [[n_internal_edges + w] for w in range(n_warehouses)]
         
         return mapping
     
@@ -1270,19 +1278,17 @@ class GNN(MyNeuralNetwork):
             if not edge_indices:  # Skip empty lists
                 continue
             
-            # Check if edge_indices is 2D (list of lists)
-            if edge_indices and isinstance(edge_indices[0], list):
-                # 2D structure - need to create 2D output tensor
-                n_rows = len(edge_indices)
-                n_cols = max(len(row) for row in edge_indices) if edge_indices else 0
-                result = torch.zeros(batch_size, n_rows, n_cols, device=device)
-                for i, row_edges in enumerate(edge_indices):
-                    for j, edge_idx in enumerate(row_edges):
-                        result[:, i, j] = allocated_outputs[:, int(edge_idx)]
-                outputs[output_type] = result
-            else:
-                # 1D list - just use list indexing
-                outputs[output_type] = allocated_outputs[:, edge_indices]
+            # All edge_indices are now 2D (list of lists)
+            # Create 2D output tensor
+            n_rows = len(edge_indices)
+            n_cols = max(len(row) for row in edge_indices) if edge_indices else 0
+            result = torch.zeros(batch_size, n_rows, n_cols, device=device)
+            for i, row_edges in enumerate(edge_indices):
+                for j, edge_idx in enumerate(row_edges):
+                    result[:, i, j] = allocated_outputs[:, int(edge_idx)]
+            
+            # Expand to 3D for stores, warehouses, echelons
+            outputs[output_type] = result.unsqueeze(2)
         
         return outputs
     
