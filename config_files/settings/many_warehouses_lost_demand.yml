@@ -109,8 +109,9 @@ warehouse_params:
   # 'holding_cost': 0.3
   # 'lead_time': 3
   # For multiple warehouses, can use lists or uniform values:
-  'holding_cost': [0.3, 0.35]  # Different costs for each warehouse
-  'lead_time': 3  # Same lead time for all warehouses     
+  'holding_cost': [0.3, 0.4]  # Different costs for each warehouse
+  'lead_time': 3  # Same lead time for all warehouses
+  'edge_cost': [0.5, 1.5]  # Procurement cost per unit ordered from outside supplier     
 
 echelon_params: 
   null

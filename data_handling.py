@@ -27,6 +27,7 @@ class Scenario():
         self.initial_warehouse_inventories = self.generate_initial_warehouse_inventory(warehouse_params)
         self.warehouse_lead_times = self.generate_warehouse_data(warehouse_params, 'lead_time')
         self.warehouse_holding_costs = self.generate_warehouse_data(warehouse_params, 'holding_cost')
+        self.warehouse_edge_costs = self.generate_warehouse_data(warehouse_params, 'edge_cost') if warehouse_params and 'edge_cost' in warehouse_params else None
 
         self.initial_echelon_inventories = self.generate_initial_echelon_inventory(echelon_params)
         self.echelon_lead_times = self.generate_echelon_data(echelon_params, 'lead_time')
@@ -65,6 +66,7 @@ class Scenario():
                 'initial_warehouse_inventories': self.initial_warehouse_inventories,
                 'warehouse_lead_times': self.warehouse_lead_times,
                 'warehouse_holding_costs': self.warehouse_holding_costs,
+                'warehouse_edge_costs': self.warehouse_edge_costs,
                 'initial_echelon_inventories': self.initial_echelon_inventories,
                 'echelon_holding_costs': self.echelon_holding_costs,
                 'echelon_lead_times': self.echelon_lead_times,

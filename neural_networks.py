@@ -748,10 +748,14 @@ class GNN(MyNeuralNetwork):
         
         # Warehouse features
         warehouse_inv_len = observation['warehouse_inventories'].size(-1)
-        warehouse_features = torch.cat([
+        warehouse_feature_list = [
             observation['warehouse_inventories'],
             observation['warehouse_holding_costs'].unsqueeze(-1)
-        ], dim=-1)
+        ]
+        # Add edge costs if available
+        if 'warehouse_edge_costs' in observation and observation['warehouse_edge_costs'] is not None:
+            warehouse_feature_list.append(observation['warehouse_edge_costs'].unsqueeze(-1))
+        warehouse_features = torch.cat(warehouse_feature_list, dim=-1)
         features_list.append(warehouse_features)
         inv_lengths.append(warehouse_inv_len)
         
@@ -809,8 +813,6 @@ class GNN(MyNeuralNetwork):
             'num_message_passing': num_message_passing,  # Number of message passing iterations
             'edge_index_mapping': edge_index_mapping,  # Dict mapping output types to edge indices
             'node_inventories': node_inventories,  # On-hand inventory for each node
-            'n_stores': n_stores,  # Needed for output tensor dimensions
-            'n_warehouses': n_warehouses,  # Needed for output tensor dimensions
         }
         
         return graph_network, all_features
@@ -833,7 +835,7 @@ class GNN(MyNeuralNetwork):
             # Echelon to echelon lead times
             for i in range(n_extra_echelons - 1):
                 if adjacency[i, i + 1] > 0:
-                    lead_time_matrix[i, i + 1] = observation['echelon_lead_times'][0, i]
+                    lead_time_matrix[i, i + 1] = observation['echelon_lead_times'][0, i + 1]
             
             # Last echelon to warehouse
             echelon_idx = n_extra_echelons - 1
@@ -1048,15 +1050,17 @@ class GNN(MyNeuralNetwork):
         customer_edges = torch.cat([source_features, customer_features, customer_lead_times], dim=-1)
         edge_list.append(customer_edges)
         
-        # Add self-loops for nodes that supply to others
-        # Nodes with outgoing edges (excluding edges to customers)
-        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
-        if supplying_nodes.size(0) > 0:
-            node_features = nodes[:, supplying_nodes]
-            self_loop_lead_times = torch.zeros(batch_size, supplying_nodes.size(0), 1, device=device)
-            
-            self_loops = torch.cat([node_features, node_features, self_loop_lead_times], dim=-1)
-            edge_list.append(self_loops)
+        # Add self-loops for nodes that supply to others (except in transshipment cases)
+        # In transshipment, nodes cannot hold inventory so self-loops don't make sense
+        if not self.transshipment:
+            # Nodes with outgoing edges (excluding edges to customers)
+            supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+            if supplying_nodes.size(0) > 0:
+                node_features = nodes[:, supplying_nodes]
+                self_loop_lead_times = torch.zeros(batch_size, supplying_nodes.size(0), 1, device=device)
+                
+                self_loops = torch.cat([node_features, node_features, self_loop_lead_times], dim=-1)
+                edge_list.append(self_loops)
         
         # Concatenate all edge features
         edge_features = torch.cat(edge_list, dim=1)
@@ -1127,33 +1131,36 @@ class GNN(MyNeuralNetwork):
         
         edge_idx += n_demand_edges
         
-        # Aggregate messages from self-loops
-        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
-        if supplying_nodes.size(0) > 0:
-            n_self_loops = supplying_nodes.size(0)
-            self_loop_edges = edges[:, edge_idx:edge_idx+n_self_loops]
-            
-            for i, node_idx in enumerate(supplying_nodes):
-                # Self-loops contribute to both incoming and outgoing
-                incoming[:, node_idx] += self_loop_edges[:, i]
-                outgoing[:, node_idx] += self_loop_edges[:, i]
+        # Aggregate messages from self-loops (if not transshipment)
+        if not self.transshipment:
+            supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+            if supplying_nodes.size(0) > 0:
+                n_self_loops = supplying_nodes.size(0)
+                self_loop_edges = edges[:, edge_idx:edge_idx+n_self_loops]
+                
+                for i, node_idx in enumerate(supplying_nodes):
+                    # Self-loops contribute to both incoming and outgoing
+                    incoming[:, node_idx] += self_loop_edges[:, i]
+                    outgoing[:, node_idx] += self_loop_edges[:, i]
         
         # Normalize aggregated messages by number of connections
         # Count incoming connections for each node
         in_degree = adjacency.sum(dim=0).float()  # How many nodes send to this node
         in_degree += has_outside_supplier.float()  # Add supplier connections
         
-        # Add self-loops to in-degree for supplying nodes
-        for node_idx in supplying_nodes:
-            in_degree[node_idx] += 1
+        # Add self-loops to in-degree for supplying nodes (if not transshipment)
+        if not self.transshipment:
+            for node_idx in supplying_nodes:
+                in_degree[node_idx] += 1
         
         # Count outgoing connections for each node
         out_degree = adjacency.sum(dim=1).float()  # How many nodes this node sends to
         out_degree += has_demand.float()  # Add customer connections
         
-        # Add self-loops to out-degree for supplying nodes
-        for node_idx in supplying_nodes:
-            out_degree[node_idx] += 1
+        # Add self-loops to out-degree for supplying nodes (if not transshipment)
+        if not self.transshipment:
+            for node_idx in supplying_nodes:
+                out_degree[node_idx] += 1
         
         # Normalize (avoid division by zero)
         in_degree = torch.where(in_degree > 0, in_degree, torch.ones_like(in_degree))
@@ -1212,11 +1219,12 @@ class GNN(MyNeuralNetwork):
         edge_sources.append(nodes[:, demand_nodes])
         edge_targets.append(torch.zeros(nodes.size(0), demand_nodes.size(0), nodes.size(-1), device=device))
         
-        # Self-loops for nodes with outgoing edges
-        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
-        if supplying_nodes.size(0) > 0:
-            edge_sources.append(nodes[:, supplying_nodes])
-            edge_targets.append(nodes[:, supplying_nodes])
+        # Self-loops for nodes with outgoing edges (if not transshipment)
+        if not self.transshipment:
+            supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+            if supplying_nodes.size(0) > 0:
+                edge_sources.append(nodes[:, supplying_nodes])
+                edge_targets.append(nodes[:, supplying_nodes])
         
         # Concatenate all edge sources and targets
         all_edge_sources = torch.cat(edge_sources, dim=1)
@@ -1330,11 +1338,12 @@ class GNN(MyNeuralNetwork):
         # Skip demand edges
         edge_idx += has_demand.sum().item()
         
-        # Self-loops
-        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
-        for node_idx in supplying_nodes:
-            node_to_edges[node_idx.item()].append(edge_idx)
-            edge_idx += 1
+        # Self-loops (if not transshipment)
+        if not self.transshipment:
+            supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+            for node_idx in supplying_nodes:
+                node_to_edges[node_idx.item()].append(edge_idx)
+                edge_idx += 1
         
         # Apply proportional allocation for each node with outgoing edges
         for node_idx, edge_list in node_to_edges.items():

@@ -249,6 +249,14 @@ class Simulator(gym.Env):
         post_warehouse_inventory_on_hand = warehouse_inventory_on_hand - warehouse_store_orders
 
         reward = observation['warehouse_holding_costs'] * torch.clip(post_warehouse_inventory_on_hand, min=0)
+        
+        # Add edge costs (procurement costs) if available
+        if 'warehouse_edge_costs' in observation and observation['warehouse_edge_costs'] is not None:
+            # action['warehouses'] is [batch, n_warehouses, n_sources] where n_sources=1 for outside supplier
+            # Sum across sources (dim=2) to get total orders per warehouse
+            warehouse_orders = action['warehouses'].sum(dim=2)  # [batch, n_warehouses]
+            edge_cost_penalty = observation['warehouse_edge_costs'] * warehouse_orders
+            reward = reward + edge_cost_penalty
         # Expand warehouse_lead_times to 3D to match allocation shape
         warehouse_lead_times_3d = observation['warehouse_lead_times'].unsqueeze(2)
         observation['warehouse_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
@@ -304,6 +312,8 @@ class Simulator(gym.Env):
             observation['warehouse_lead_times'] = data['warehouse_lead_times']
             observation['warehouse_holding_costs'] = data['warehouse_holding_costs']
             observation['warehouse_inventories'] = data['initial_warehouse_inventories']
+            if 'warehouse_edge_costs' in data and data['warehouse_edge_costs'] is not None:
+                observation['warehouse_edge_costs'] = data['warehouse_edge_costs']
         
         if self.problem_params['n_extra_echelons'] > 0:
             observation['echelon_lead_times'] = data['echelon_lead_times']
