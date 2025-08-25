@@ -208,10 +208,15 @@ class Simulator(gym.Env):
         # If all lead times are the same, we can simplify this step by just adding the allocation to the last
         # column of the inventory tensor and moving all columns "to the left".
         # We leave this method as it is more general!
+        
+        # action['stores'] is [batch, n_stores, n_warehouses]
+        # Sum across warehouse dimension to get total orders per store
+        store_orders = action['stores'].sum(dim=2)  # [batch, n_stores]
+        
         observation['store_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
             store_inventory, 
             post_inventory_on_hand, 
-            action['stores'], 
+            store_orders, 
             observation['lead_times'], 
             self._internal_data['allocation_shift']
             )
@@ -235,7 +240,13 @@ class Simulator(gym.Env):
 
         warehouse_inventory = self.observation['warehouse_inventories']
         warehouse_inventory_on_hand = warehouse_inventory[:, :, 0]
-        post_warehouse_inventory_on_hand = warehouse_inventory_on_hand - action['stores'].sum(dim=1).unsqueeze(1)
+        
+        # Calculate store orders per warehouse
+        # action['stores'] is [batch, n_stores, n_warehouses]
+        # Sum across stores to get total orders for each warehouse
+        warehouse_store_orders = action['stores'].sum(dim=1)  # [batch, n_warehouses]
+        
+        post_warehouse_inventory_on_hand = warehouse_inventory_on_hand - warehouse_store_orders
 
         reward = observation['warehouse_holding_costs'] * torch.clip(post_warehouse_inventory_on_hand, min=0)
         observation['warehouse_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
