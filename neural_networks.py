@@ -108,13 +108,14 @@ class MyNeuralNetwork(nn.Module):
     def initialize_bias(self, key, pos, value):
         self.layers[key][pos].bias.data.fill_(value)
     
-    def apply_proportional_allocation(self, desired_allocations, available_inventory):
+    def apply_proportional_allocation(self, desired_allocations, available_inventory, transshipment=False):
         """
         Apply proportional allocation when desired allocations exceed available inventory.
         
         Args:
             desired_allocations: Tensor of shape [batch_size, n_allocations] with desired quantities
             available_inventory: Tensor of shape [batch_size] or [batch_size, 1] with available inventory
+            transshipment: If True, the supplying node cannot hold inventory (no clipping at 1)
         
         Returns:
             Allocated quantities scaled proportionally when inventory is insufficient
@@ -126,8 +127,12 @@ class MyNeuralNetwork(nn.Module):
         # Sum of all desired allocations
         sum_desired = desired_allocations.sum(dim=1)
         
-        # Calculate scaling factor (min of 1 and available/desired)
-        scaling_factor = torch.clip(available_inventory / (sum_desired + 1e-10), max=1.0)
+        # Calculate scaling factor
+        scaling_factor = available_inventory / (sum_desired + 1e-10)
+        
+        # Apply clipping only if not transshipment
+        if not transshipment:
+            scaling_factor = torch.clip(scaling_factor, max=1.0)
         
         # Apply scaling to all allocations
         return desired_allocations * scaling_factor[:, None]
@@ -620,6 +625,9 @@ class GNN(MyNeuralNetwork):
         
         # Store scenario for creating graph network in forward pass
         self.scenario = scenario
+        
+        # Check if this is a transshipment case (warehouse cannot hold inventory)
+        self.transshipment = args.get('transshipment', False)
         
     def prepare_graph_and_features(self, observation):
         """
@@ -1317,7 +1325,7 @@ class GNN(MyNeuralNetwork):
             available_inv = node_inventories[:, node_idx]
             
             # Apply proportional allocation using the general method
-            scaled_allocations = self.apply_proportional_allocation(desired_allocations, available_inv)
+            scaled_allocations = self.apply_proportional_allocation(desired_allocations, available_inv, self.transshipment)
             
             # Write back the scaled allocations
             for i, idx in enumerate(edge_list):
