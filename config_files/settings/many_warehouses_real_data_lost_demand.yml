@@ -1,0 +1,133 @@
+seeds : 
+  'underage_cost': 28 
+  'holding_cost': 73 
+  'mean': 33
+  'coef_of_var': 92 
+  'lead_time': 41 
+  'demand': 57 
+  'initial_inventory': 4839
+  'warehouse': 10
+
+test_seeds :  # Seeds for test set
+  'underage_cost': 28 
+  'holding_cost': 73 
+  'mean': 33 
+  'coef_of_var': 92
+  'lead_time': 41
+  'demand': 65
+  'initial_inventory': 4839
+  'warehouse': 10
+
+sample_data_params:
+  'split_by_period': True
+  'train_periods': (0, 111)
+  'dev_periods': (88, 141)
+  'test_periods': (118, 171)
+
+problem_params : 
+  'n_stores': 21
+  'n_warehouses': 3
+  'n_extra_echelons': 0
+  'lost_demand': True
+  'maximize_profit': True
+  # Adjacency matrix defining warehouse-store connections
+  # Rows: warehouses, Columns: stores
+  # 1 = connected, 0 = not connected
+  'warehouse_store_adjacency': [
+    [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1],  # Warehouse 0
+    [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1],  # Warehouse 1
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]   # Warehouse 2
+  ]
+
+params_by_dataset : 
+  'train': 
+    'n_samples': 288
+    'batch_size': 72
+    'periods': 95
+    'ignore_periods': 16
+  'dev': 
+    'n_samples': 288
+    'batch_size': 288
+    'periods': 37
+    'ignore_periods': 16
+  'test': 
+    'n_samples': 288
+    'batch_size': 288
+    'periods': 37
+    'ignore_periods': 16
+
+observation_params:
+  'include_warehouse_inventory': True
+  'include_static_features':
+    'holding_costs': True 
+    'underage_costs': True 
+    'lead_times': True 
+    'mean': False  # Not applicable for real data
+    'std': False   # Not applicable for real data
+  'demand': 
+    'past_periods': 16 
+    'period_shift': 16
+  'time_features_file': 'data_files/favorita_21_stores/dates_with_info.csv'
+  'time_features':
+    ['days_from_christmas']
+  'include_days_to_christmas': True
+
+store_params: 
+  'demand': 
+    'distribution': 'real'
+    'file_location': 'data_files/favorita_21_stores/weekly_sales.pt'
+    'sample_across_stores': False
+    'expand': False
+    'clip': False
+    'decimals': 3
+  'lead_time': 
+    'sample_across_stores': False
+    'vary_across_samples': False
+    'expand': True  # This will create a [n_stores, n_warehouses] matrix
+    'value': [
+      # For each store, lead times from [warehouse_0, warehouse_1, warehouse_2]
+      # Transposed from the original edge_lead_times matrix
+      [6, 1, 5],  # Store 0
+      [6, 1, 5],  # Store 1
+      [6, 1, 5],  # Store 2
+      [6, 1, 5],  # Store 3
+      [6, 1, 4],  # Store 4
+      [5, 2, 6],  # Store 5
+      [5, 2, 5],  # Store 6
+      [5, 2, 5],  # Store 7
+      [5, 1, 5],  # Store 8
+      [5, 2, 5],  # Store 9
+      [5, 2, 5],  # Store 10
+      [5, 2, 6],  # Store 11
+      [5, 2, 5],  # Store 12
+      [5, 2, 6],  # Store 13
+      [6, 1, 5],  # Store 14
+      [6, 1, 5],  # Store 15
+      [6, 1, 5],  # Store 16
+      [6, 1, 5],  # Store 17
+      [6, 1, 5],  # Store 18
+      [5, 1, 4],  # Store 19
+      [5, 2, 5]   # Store 20
+    ]
+  'holding_cost': 
+    'sample_across_stores': False
+    'vary_across_samples': False
+    'expand': True
+    'file_location': 'data_files/favorita_21_stores/holding_costs.pt'
+  'underage_cost': 
+    'sample_across_stores': False
+    'vary_across_samples': False 
+    'expand': True
+    'file_location': 'data_files/favorita_21_stores/underage_costs.pt'
+  'initial_inventory': 
+    'sample': False
+    'inventory_periods': 6
+
+warehouse_params: 
+  # For 3 warehouses, using list values from original config
+  'holding_cost': [0.3, 0.4, 0.2]  # Different costs for each warehouse
+  'lead_time': [3, 3, 3]  # Same lead time for all warehouses from supplier
+  'edge_cost': [0.5, 1.5, 0.7]  # Different procurement cost per unit for each warehouse
+
+echelon_params: 
+  null

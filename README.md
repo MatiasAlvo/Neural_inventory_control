@@ -86,6 +86,8 @@ We provide config files for all the settings and all the policies described in o
 
 The settings considered are the following:
 
+- `many_warehouses_lost_demand`: Multiple warehouses and many stores with configurable store-warehouse adjacency, under a lost demand assumption.
+- `many_warehouses_real_data_lost_demand`: Multiple warehouses (3) serving many stores (21) under a lost demand assumption, using real sales data from the Favorita retail dataset. Features warehouse-store assignment matrix and real demand/cost data.
 - `one_store_backlogged`: One store under a backlogged demand assumption.
 - `one_store_lost`: One store under a lost demand assumption.
 - `one_store_real_data_lost_demand`: One store under a lost demand assumption, but considering demand traces built using sales data from a real retailer.
