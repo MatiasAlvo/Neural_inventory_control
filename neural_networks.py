@@ -1222,8 +1222,6 @@ class GNN(MyNeuralNetwork):
         apply proportional allocation, then use mapping to organize returns.
         """
         mapping = graph_network['edge_index_mapping']
-        n_stores = graph_network['n_stores']
-        n_warehouses = graph_network['n_warehouses']
         
         batch_size = edges.size(0)
         device = edges.device
@@ -1253,7 +1251,7 @@ class GNN(MyNeuralNetwork):
                 result = torch.zeros(batch_size, n_rows, n_cols, device=device)
                 for i, row_edges in enumerate(edge_indices):
                     for j, edge_idx in enumerate(row_edges):
-                        result[:, i, j] = allocated_outputs[:, edge_idx]
+                        result[:, i, j] = allocated_outputs[:, int(edge_idx)]
                 outputs[output_type] = result
             else:
                 # 1D list - just use list indexing
@@ -1304,7 +1302,8 @@ class GNN(MyNeuralNetwork):
                 continue
             
             # Gather desired allocations for this node's outgoing edges
-            desired_allocations = torch.stack([edge_outputs[:, idx] for idx in edge_list], dim=1)
+            # Ensure indices are integers
+            desired_allocations = torch.stack([edge_outputs[:, int(idx)] for idx in edge_list], dim=1)
             
             # Get node's available inventory
             available_inv = node_inventories[:, node_idx]
@@ -1314,7 +1313,7 @@ class GNN(MyNeuralNetwork):
             
             # Write back the scaled allocations
             for i, idx in enumerate(edge_list):
-                allocated_outputs[:, idx] = scaled_allocations[:, i]
+                allocated_outputs[:, int(idx)] = scaled_allocations[:, i]
         
         return allocated_outputs
 
