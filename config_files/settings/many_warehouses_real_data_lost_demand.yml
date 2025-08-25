@@ -110,15 +110,15 @@ store_params:
       [5, 2, 5]   # Store 20
     ]
   'holding_cost': 
-    'sample_across_stores': False
+    'sample_across_stores': True
     'vary_across_samples': False
-    'expand': True
-    'file_location': 'data_files/favorita_21_stores/holding_costs.pt'
+    'expand': False
+    'range': [0.7, 1.3]
   'underage_cost': 
-    'sample_across_stores': False
-    'vary_across_samples': False 
-    'expand': True
-    'file_location': 'data_files/favorita_21_stores/underage_costs.pt'
+    'sample_across_stores': True
+    'vary_across_samples': True 
+    'expand': False
+    'range': [6.3, 11.7]
   'initial_inventory': 
     'sample': False
     'inventory_periods': 6
@@ -126,7 +126,7 @@ store_params:
 warehouse_params: 
   # For 3 warehouses, using list values from original config
   'holding_cost': [0.3, 0.4, 0.2]  # Different costs for each warehouse
-  'lead_time': [3, 3, 3]  # Same lead time for all warehouses from supplier
+  'lead_time': 3  # Same lead time for all warehouses from supplier
   'edge_cost': [0.5, 1.5, 0.7]  # Different procurement cost per unit for each warehouse
 
 echelon_params: 

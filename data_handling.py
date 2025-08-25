@@ -93,11 +93,26 @@ class Scenario():
         # Only include warehouse inventories if there are warehouses
         if self.problem_params['n_warehouses'] > 0:
             split_by['sample_index'].append('initial_warehouse_inventories')
+            split_by['sample_index'].append('warehouse_lead_times')
+            split_by['sample_index'].append('warehouse_holding_costs')
+            split_by['sample_index'].append('warehouse_edge_costs')
 
+        # Include echelon data if there are extra echelons
+        if self.problem_params['n_extra_echelons'] > 0:
+            split_by['sample_index'].append('initial_echelon_inventories')
+            split_by['sample_index'].append('echelon_holding_costs')
+            split_by['sample_index'].append('echelon_lead_times')
+        
         if self.store_params['demand']['distribution'] == 'real':
             split_by['period'].append('demands')
         else:
             split_by['sample_index'].append('demands')
+        
+        # Add mean and std if they're going to be generated (not None)
+        if 'mean' in self.observation_params['include_static_features'] and self.observation_params['include_static_features']['mean']:
+            split_by['sample_index'].append('mean')
+        if 'std' in self.observation_params['include_static_features'] and self.observation_params['include_static_features']['std']:
+            split_by['sample_index'].append('std')
         
         for k in self.time_features.keys():
             split_by['period'].append(k)
@@ -416,7 +431,8 @@ class DatasetCreator():
     def split_by_period(self, scenario, periods_for_split):
 
         data = scenario.get_data()
-        common_data = {k: data[k] for k in scenario.split_by['sample_index']}
+        # Only include keys that actually exist in the data
+        common_data = {k: data[k] for k in scenario.split_by['sample_index'] if k in data}
         out_datasets = []
 
         for period_range in periods_for_split:
@@ -425,7 +441,8 @@ class DatasetCreator():
             period_range = slice(*map(int, period_range.strip('() ').split(',')))
 
             for k in scenario.split_by['period']:
-                this_data[k] = data[k][:, :, period_range]
+                if k in data:  # Only add if key exists
+                    this_data[k] = data[k][:, :, period_range]
             out_datasets.append(this_data)
         
         return out_datasets
