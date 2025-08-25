@@ -1289,7 +1289,7 @@ class GNN(MyNeuralNetwork):
                     result[:, i, j] = allocated_outputs[:, int(edge_idx)]
             
             # Expand to 3D for stores, warehouses, echelons
-            outputs[output_type] = result.unsqueeze(2)
+            outputs[output_type] = result
         
         return outputs
     
