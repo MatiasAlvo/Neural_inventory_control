@@ -19,7 +19,7 @@ class Scenario():
         self.demands = self.generate_demand_samples(problem_params, store_params, store_params['demand'], seeds)
         self.underage_costs = self.generate_data_for_samples_and_stores(problem_params, store_params['underage_cost'], seeds['underage_cost'], discrete=False)
         self.holding_costs = self.generate_data_for_samples_and_stores(problem_params, store_params['holding_cost'], seeds['holding_cost'], discrete=False)
-        self.lead_times = self.generate_data_for_samples_and_stores(problem_params, store_params['lead_time'], seeds['lead_time'], discrete=True).to(torch.int64)
+        self.lead_times = self.generate_lead_times(problem_params, store_params['lead_time'], seeds['lead_time'])
             
         self.means, self.stds = self.generate_means_and_stds(observation_params, store_params)
         self.initial_inventories = self.generate_initial_inventories(problem_params, store_params, self.demands, self.lead_times, seeds['initial_inventory'])
@@ -253,6 +253,23 @@ class Scenario():
         else:
             return torch.tensor(params_copy['value'])
     
+    def generate_lead_times(self, problem_params, lead_time_params, seed):
+        """
+        Generate lead times ensuring proper 3D dimensionality [num_samples, n_stores, n_warehouses]
+        """
+        lead_times_raw = self.generate_data_for_samples_and_stores(problem_params, lead_time_params, seed, discrete=True)
+        
+        if lead_times_raw.dim() == 2:
+            n_warehouses = problem_params.get('n_warehouses', 0)
+            if n_warehouses > 0:
+                lead_times = lead_times_raw.unsqueeze(2).expand(-1, -1, n_warehouses)
+            else:
+                lead_times = lead_times_raw.unsqueeze(2)
+        else:
+            lead_times = lead_times_raw
+        
+        return lead_times.to(torch.int64)
+    
     def generate_initial_inventories(self, problem_params, store_params, demands, lead_times, seed):
         """
         Generate initial inventory data
@@ -265,7 +282,7 @@ class Scenario():
             demand_mults = np.random.uniform(*store_params['initial_inventory']['range_mult'], 
                                              size=(self.num_samples, 
                                                    problem_params['n_stores'], 
-                                                   max(store_params['initial_inventory']['inventory_periods'], lead_times.max()) 
+                                                   max(store_params['initial_inventory']['inventory_periods'], lead_times.max().item()) 
                                                    )
                                             )
             return demand_mean[None, :, None] * demand_mults

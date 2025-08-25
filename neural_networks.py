@@ -402,7 +402,9 @@ class SymmetryAware(MyNeuralNetwork):
 
         # Get tensor of store parameters
         store_inventories, warehouse_inventories = observation['store_inventories'], observation['warehouse_inventories']
-        store_params = torch.stack([observation[k] for k in ['mean', 'std', 'underage_costs', 'lead_times']], dim=2)
+        # Lead times are 3D [batch, n_stores, n_warehouses], use first warehouse
+        lead_times_2d = observation['lead_times'][:, :, 0]
+        store_params = torch.stack([observation[k] for k in ['mean', 'std', 'underage_costs']] + [lead_times_2d], dim=2)
         
         # Get context vector using local state (and without using local parameters)
         input_tensor = self.flatten_then_concatenate_tensors([store_inventories, warehouse_inventories])
@@ -458,9 +460,12 @@ class DataDrivenNet(MyNeuralNetwork):
 
         # Input tensor is given by full store inventories, past demands, underage costs for 
         # each sample path, and days from Christmas
+        # Lead times are 3D [batch, n_stores, n_warehouses], use first warehouse
+        lead_times_2d = observation['lead_times'][:, :, 0]
         input_tensor = self.flatten_then_concatenate_tensors(
                 [observation['store_inventories']] + 
-                [observation[key] for key in ['past_demands', 'underage_costs', 'days_from_christmas', 'lead_times']]
+                [observation[key] for key in ['past_demands', 'underage_costs', 'days_from_christmas']] +
+                [lead_times_2d]
             )
 
         return {'stores': self.net['master'](input_tensor)} # Clip output to be non-negative
@@ -525,7 +530,9 @@ class QuantilePolicy(MyNeuralNetwork):
         Then, with the quantile forecaster, we "invert" the quantiles to get base-stock levels and obtain the store allocation.
         """
 
-        underage_costs, holding_costs, lead_times, past_demands, days_from_christmas, store_inventories = [observation[key] for key in ['underage_costs', 'holding_costs', 'lead_times', 'past_demands', 'days_from_christmas', 'store_inventories']]
+        # Lead times are 3D [batch, n_stores, n_warehouses], use first warehouse
+        lead_times = observation['lead_times'][:, :, 0]
+        underage_costs, holding_costs, past_demands, days_from_christmas, store_inventories = [observation[key] for key in ['underage_costs', 'holding_costs', 'past_demands', 'days_from_christmas', 'store_inventories']]
 
         # Get the desired quantiles for each store, which will be used to forecast the base stock levels
         # This function is different for each type of QuantilePolicy
@@ -813,7 +820,7 @@ class GNN(MyNeuralNetwork):
         n_warehouses = self.scenario.problem_params.get('n_warehouses', 0)
         n_stores = self.scenario.problem_params.get('n_stores', 0)
         
-        # Serial network case
+        # Serial network case (n_warehouses=1, n_stores=1 by definition)
         if n_extra_echelons > 0:
             # Echelon to echelon lead times
             for i in range(n_extra_echelons - 1):
@@ -821,25 +828,29 @@ class GNN(MyNeuralNetwork):
                     lead_time_matrix[i, i + 1] = observation['echelon_lead_times'][0, i]
             
             # Last echelon to warehouse
-            if n_extra_echelons > 0 and n_warehouses > 0:
-                echelon_idx = n_extra_echelons - 1
-                warehouse_idx = n_extra_echelons
-                if adjacency[echelon_idx, warehouse_idx] > 0:
-                    lead_time_matrix[echelon_idx, warehouse_idx] = observation['echelon_lead_times'][0, echelon_idx]
+            echelon_idx = n_extra_echelons - 1
+            warehouse_idx = n_extra_echelons
+            if adjacency[echelon_idx, warehouse_idx] > 0:
+                # Use warehouse_lead_times for the connection from echelon to warehouse
+                lead_time_matrix[echelon_idx, warehouse_idx] = observation['warehouse_lead_times'][0, 0]
             
-            # Warehouse to store
-            if n_warehouses > 0 and n_stores > 0:
-                warehouse_idx = n_extra_echelons
-                store_idx = n_extra_echelons + n_warehouses
-                if adjacency[warehouse_idx, store_idx] > 0:
-                    lead_time_matrix[warehouse_idx, store_idx] = observation['warehouse_lead_times'][0, 0]
+            # Warehouse to store (always single warehouse to single store in serial system)
+            warehouse_idx = n_extra_echelons
+            store_idx = n_extra_echelons + n_warehouses
+            if adjacency[warehouse_idx, store_idx] > 0:
+                # Lead times are now always 3D [batch, n_stores, n_warehouses]
+                # For serial system it's [batch, 1, 1]
+                lead_time_matrix[warehouse_idx, store_idx] = observation['lead_times'][0, 0, 0]
         
         # Warehouse-store network case
         else:
+            # Lead times are always 3D now [batch, n_stores, n_warehouses]
+            warehouse_store_lt_matrix = observation['lead_times'][0]  # [n_stores, n_warehouses]
             for w_idx in range(n_warehouses):
                 for s_idx in range(n_stores):
                     if adjacency[w_idx, n_warehouses + s_idx] > 0:
-                        lead_time_matrix[w_idx, n_warehouses + s_idx] = observation['lead_times'][0, s_idx]
+                        # Extract lead time from store s to warehouse w
+                        lead_time_matrix[w_idx, n_warehouses + s_idx] = warehouse_store_lt_matrix[s_idx, w_idx]
         
         # Add a row for virtual supplier lead times (we'll handle this in create_edges)
         # For nodes that connect to outside suppliers, store their lead times

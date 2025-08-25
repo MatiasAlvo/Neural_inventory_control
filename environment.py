@@ -210,14 +210,17 @@ class Simulator(gym.Env):
         # We leave this method as it is more general!
         
         # action['stores'] is [batch, n_stores, n_warehouses]
-        # Sum across warehouse dimension to get total orders per store
-        store_orders = action['stores'].sum(dim=2)  # [batch, n_stores]
+        # Keep the 3D structure to maintain warehouse-specific orders
+        store_orders = action['stores']  # [batch, n_stores, n_warehouses]
+        
+        # Lead times are always 3D now [batch, n_stores, n_warehouses]
+        store_lead_times = observation['lead_times']
         
         observation['store_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
             store_inventory, 
             post_inventory_on_hand, 
             store_orders, 
-            observation['lead_times'], 
+            store_lead_times, 
             self._internal_data['allocation_shift']
             )
         
@@ -376,20 +379,57 @@ class Simulator(gym.Env):
         entire batch. We created allocation_shifts earlier, which dictates the position shift of that long vector
         for each store and each sample. We then add the corresponding lead time to obtain the actual position in 
         which to insert the action
+        
+        Now handles 3D allocation tensors for multi-warehouse scenarios.
         """
         
-        return torch.stack(
-            [
-                inventory_on_hand + inventory[:, :, 1], 
-                *self.move_columns_left(inventory, 1, inventory.shape[2] - 1), 
-                torch.zeros_like(allocation)
-            ], 
+        # Handle both 2D and 3D allocation tensors
+        if allocation.dim() == 3:
+            # 3D case: [batch, n_stores, n_warehouses]
+            # Create the base inventory tensor with zeros for new orders
+            # Each warehouse's allocation will be added at its specific lead time position
+            updated_inventory = torch.stack(
+                [
+                    inventory_on_hand + inventory[:, :, 1], 
+                    *self.move_columns_left(inventory, 1, inventory.shape[2] - 1), 
+                    torch.zeros(allocation.shape[0], allocation.shape[1], device=allocation.device)
+                ], 
                 dim=2
-                ).put(
-                    (allocation_shifter + lead_times.long() - 1).flatten(),  # Indexes where to 'put' allocation in long vector
-                    allocation.flatten(),  # Values to 'put' in long vector
-                    accumulate=True  # True means adding to existing values, instead of replacing
-                    )
+            )
+            
+            # Now add each warehouse's contribution with its specific lead time
+            batch_size, n_stores, n_warehouses = allocation.shape
+            
+            # Expand allocation_shifter to handle warehouse dimension
+            # allocation_shifter is [batch, n_stores], need [batch, n_stores, n_warehouses]
+            allocation_shifter_3d = allocation_shifter.unsqueeze(2).expand(-1, -1, n_warehouses)
+            
+            # Flatten everything for the put operation
+            indices = (allocation_shifter_3d + lead_times.long() - 1).flatten()
+            values = allocation.flatten()
+            
+            # Filter out zero allocations to avoid unnecessary operations
+            non_zero_mask = values != 0
+            if non_zero_mask.any():
+                indices = indices[non_zero_mask]
+                values = values[non_zero_mask]
+                updated_inventory = updated_inventory.put(indices, values, accumulate=True)
+            
+            return updated_inventory
+        else:
+            # 2D case: original behavior
+            return torch.stack(
+                [
+                    inventory_on_hand + inventory[:, :, 1], 
+                    *self.move_columns_left(inventory, 1, inventory.shape[2] - 1), 
+                    torch.zeros_like(allocation)
+                ], 
+                dim=2
+            ).put(
+                (allocation_shifter + lead_times.long() - 1).flatten(),
+                allocation.flatten(),
+                accumulate=True
+            )
 
     def update_past_demands(self, data, observation_params, batch_size, stores, current_period):
         """
