@@ -373,6 +373,10 @@ class VanillaOneWarehouse(MyNeuralNetwork):
         # Apply sigmoid to warehouse intermediate outputs and multiply by warehouse upper bound
         warehouse_allocation = self.activation_functions['sigmoid'](warehouse_intermediate_outputs)*(self.warehouse_upper_bound.unsqueeze(1))
 
+        # Reshape store_allocation to [batch, n_stores, n_warehouses] for consistency
+        # n_warehouses = 1 for VanillaOneWarehouse
+        store_allocation = store_allocation.unsqueeze(2)  # [batch, n_stores, 1]
+        
         return {
             'stores': store_allocation, 
             'warehouses': warehouse_allocation
@@ -420,6 +424,10 @@ class SymmetryAware(MyNeuralNetwork):
         # Sigmoid is applied if specified in the config file!
         warehouse_allocation = warehouse_intermediate_outputs*(self.warehouse_upper_bound.unsqueeze(1))
 
+        # Reshape store_allocation to [batch, n_stores, n_warehouses] for consistency
+        # n_warehouses = 1 for SymmetryAware
+        store_allocation = store_allocation.unsqueeze(2)  # [batch, n_stores, 1]
+        
         return {
             'stores': store_allocation, 
             'warehouses': warehouse_allocation
