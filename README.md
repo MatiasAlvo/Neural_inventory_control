@@ -101,14 +101,15 @@ The policy classes we consider are the following:
 - `echelon_stock`: Echelon stock policy (optimal for a serial system under a backlogged demand assumption).
 - `fixed_quantile`: Generalized newsvendor policy, that utilizes the same quantile for each scenario.
 - `gnn`: Graph Neural Network for multi-warehouse and serial system settings, using message passing between nodes to model supply chain dynamics. Supports flexible network topologies defined by adjacency matrices.
+- `gnn_transshipment`: GNN configured for transshipment mode where warehouses cannot hold inventory (uses `gnn` with `transshipment: True` in config).
 - `just_in_time`: Non-admissible oracle policy, that looks into the future and orders to precisely meet future demand.
 - `quantile_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]).
 - `returns_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]), but allows for negative orders. It defines a non-admissible policy.
 - `transformed_nv`: Generalized newsvendor policy, that considers a flexible mapping from newsvendor quantile (p/[p+h]) to a new quantile. This quantile is therefore different across scenarios, but fixed across time for each scenario.
 - `vanilla_one_store`: Vanilla neural network for settings with one store and no warehouse.
-- `vanilla_one_warehouse`: Vanilla neural network for settings with one warehouse and many stores.
 - `vanilla_serial`: Vanilla neural network for the serial system setting.
-- `vanilla_transshipment`: Vanilla neural network for the setting with one transshipment center and many stores.
+- `vanilla_transshipment`: Vanilla neural network for transshipment centers that cannot hold inventory (uses `vanilla_warehouse` with `transshipment: True` in config).
+- `vanilla_warehouse`: Vanilla neural network for settings with one or multiple warehouses and many stores (supports transshipment mode via config).
 
 To create a new policy class, follow these steps:
 
