@@ -108,21 +108,29 @@ class MyNeuralNetwork(nn.Module):
     def initialize_bias(self, key, pos, value):
         self.layers[key][pos].bias.data.fill_(value)
     
-    def apply_proportional_allocation(self, store_intermediate_outputs, warehouse_inventories):
+    def apply_proportional_allocation(self, desired_allocations, available_inventory):
         """
-        Apply proportional allocation feasibility enforcement function to store intermediate outputs.
-        It assigns inventory proportionally to the store order quantities, whenever inventory at the
-        warehouse is not sufficient.
+        Apply proportional allocation when desired allocations exceed available inventory.
+        
+        Args:
+            desired_allocations: Tensor of shape [batch_size, n_allocations] with desired quantities
+            available_inventory: Tensor of shape [batch_size] or [batch_size, 1] with available inventory
+        
+        Returns:
+            Allocated quantities scaled proportionally when inventory is insufficient
         """
-
-        total_limiting_inventory = warehouse_inventories[:, :, 0].sum(dim=1)  # Total inventory at the warehouse
-        sum_allocation = store_intermediate_outputs.sum(dim=1)  # Sum of all store order quantities
-
-        # Multiply current allocation by minimum between inventory/orders and 1
-        final_allocation = \
-            torch.multiply(store_intermediate_outputs,
-                           torch.clip(total_limiting_inventory / (sum_allocation + 0.000000000000001), max=1)[:, None])
-        return final_allocation
+        # Ensure available_inventory is 1D
+        if available_inventory.dim() > 1:
+            available_inventory = available_inventory.sum(dim=1)
+        
+        # Sum of all desired allocations
+        sum_desired = desired_allocations.sum(dim=1)
+        
+        # Calculate scaling factor (min of 1 and available/desired)
+        scaling_factor = torch.clip(available_inventory / (sum_desired + 1e-10), max=1.0)
+        
+        # Apply scaling to all allocations
+        return desired_allocations * scaling_factor[:, None]
     
     def apply_softmax_feasibility_function(self, store_intermediate_outputs, warehouse_inventory, transshipment=False):
         """
@@ -753,12 +761,25 @@ class GNN(MyNeuralNetwork):
             # Warehouse-store network: 1 step
             num_message_passing = 1
         
+        # Create edge index mapping
+        edge_index_mapping = self._create_edge_index_mapping(
+            adjacency, has_outside_supplier, has_demand,
+            n_stores, n_warehouses, n_extra_echelons
+        )
+        
+        # Get on-hand inventory for each node
+        node_inventories = self._get_node_inventories(observation, n_stores, n_warehouses, n_extra_echelons)
+        
         graph_network = {
             'adjacency': adjacency,
             'has_outside_supplier': has_outside_supplier,
             'has_demand': has_demand,
             'lead_time_matrix': lead_time_matrix,  # Matrix of lead times matching adjacency
             'num_message_passing': num_message_passing,  # Number of message passing iterations
+            'edge_index_mapping': edge_index_mapping,  # Dict mapping output types to edge indices
+            'node_inventories': node_inventories,  # On-hand inventory for each node
+            'n_stores': n_stores,  # Needed for output tensor dimensions
+            'n_warehouses': n_warehouses,  # Needed for output tensor dimensions
         }
         
         return graph_network, all_features
@@ -823,6 +844,84 @@ class GNN(MyNeuralNetwork):
         }
         
         return lead_time_matrix
+    
+    def _create_edge_index_mapping(self, adjacency, has_outside_supplier, has_demand,
+                                  n_stores, n_warehouses, n_extra_echelons):
+        """
+        Create mapping from output types to edge indices based on known edge ordering.
+        Edge ordering: internal edges, supplier edges, demand edges, self-loops
+        Returns a dict with keys: 'stores', 'warehouses', 'echelons'
+        """
+        mapping = {
+            'stores': [],
+            'warehouses': [],
+            'echelons': [],
+        }
+        
+        # Count edges to track indices
+        edge_indices = adjacency.nonzero(as_tuple=False)
+        n_internal_edges = edge_indices.size(0)
+        
+        if n_extra_echelons > 0:
+            # Serial network: echelons → warehouse → store
+            # n_stores = 1 and n_warehouses = 1 always in serial networks
+            # Internal edges are in order: echelon-to-echelon edges, then last-echelon-to-warehouse, then warehouse-to-store
+            
+            # The last internal edge is warehouse-to-store
+            mapping['stores'] = [n_internal_edges - 1]  # Last internal edge
+            
+            # The second to last internal edge is last-echelon-to-warehouse
+            mapping['warehouses'] = [n_internal_edges - 2]
+            
+            # First echelon orders from supplier (first supplier edge after internal edges)
+            mapping['echelons'] = [n_internal_edges]  # First supplier edge
+            
+        else:
+            # Warehouse-stores network
+            # Always use 2D structure for stores [n_stores][n_warehouses] for consistency
+            mapping['stores'] = [[] for _ in range(n_stores)]
+            
+            # Parse internal edges to build store mapping
+            for i, (src, tgt) in enumerate(edge_indices):
+                if src < n_warehouses and tgt >= n_warehouses:
+                    store_idx = (tgt - n_warehouses).item()
+                    mapping['stores'][store_idx].append(i)
+            
+            # Warehouse orders from suppliers (one supplier edge per warehouse)
+            mapping['warehouses'] = list(range(n_internal_edges, n_internal_edges + n_warehouses))
+        
+        return mapping
+    
+    def _get_node_inventories(self, observation, n_stores, n_warehouses, n_extra_echelons):
+        """
+        Get on-hand inventory for each node in the graph.
+        Returns tensor of shape [batch_size, n_nodes] with inventory for each node.
+        """
+        batch_size = observation['store_inventories'].size(0)
+        device = observation['store_inventories'].device
+        n_nodes = n_extra_echelons + n_warehouses + n_stores
+        
+        node_inventories = torch.zeros(batch_size, n_nodes, device=device)
+        node_idx = 0
+        
+        # Echelon inventories (if present)
+        if n_extra_echelons > 0:
+            echelon_inv = observation['echelon_inventories'][:, :, 0]  # On-hand inventory
+            node_inventories[:, node_idx:node_idx + n_extra_echelons] = echelon_inv
+            node_idx += n_extra_echelons
+        
+        # Warehouse inventories
+        if n_warehouses > 0:
+            warehouse_inv = observation['warehouse_inventories'][:, :, 0]  # On-hand inventory
+            node_inventories[:, node_idx:node_idx + n_warehouses] = warehouse_inv
+            node_idx += n_warehouses
+        
+        # Store inventories
+        if n_stores > 0:
+            store_inv = observation['store_inventories'][:, :, 0]  # On-hand inventory
+            node_inventories[:, node_idx:node_idx + n_stores] = store_inv
+        
+        return node_inventories
     
     def _pad_features(self, tensor, inv_len, max_inv_len, max_states_len):
         """Helper to pad inventory and state features to uniform size."""
@@ -1092,7 +1191,7 @@ class GNN(MyNeuralNetwork):
     
     def forward(self, observation):
         """
-        Forward pass through GNN for one warehouse many stores case.
+        Forward pass through GNN.
         """
         # Prepare graph structure and node features
         graph_network, all_features = self.prepare_graph_and_features(observation)
@@ -1111,28 +1210,113 @@ class GNN(MyNeuralNetwork):
         for _ in range(num_message_passing):
             nodes, edges = self.message_passing_step(graph_network, nodes, edges)
         
-        # Generate outputs from edges
-        n_stores = self.scenario.problem_params.get('n_stores', 0)
-        warehouse_order = self.net['output'](edges[:, 0:1]).squeeze(-1)
-        store_intermediate = self.net['output'](edges[:, 1:1+n_stores]).squeeze(-1)
+        # Now we need to determine which edges represent which orders
+        # Apply output network and allocate based on edge types
+        outputs = self._generate_outputs_from_edges(edges, graph_network, observation)
         
-        # Apply proportional allocation for stores based on warehouse inventory
-        # Include self-loop in the allocation
-        warehouse_self_loop_output = self.net['output'](edges[:, -1:]).squeeze(-1)
-        all_outputs = torch.cat([store_intermediate, warehouse_self_loop_output], dim=1)
-        allocations = self.apply_proportional_allocation(
-            all_outputs, 
-            observation['warehouse_inventories']
+        return outputs
+    
+    def _generate_outputs_from_edges(self, edges, graph_network, observation):
+        """
+        Generate outputs from edges: apply output network to all edges,
+        apply proportional allocation, then use mapping to organize returns.
+        """
+        mapping = graph_network['edge_index_mapping']
+        n_stores = graph_network['n_stores']
+        n_warehouses = graph_network['n_warehouses']
+        
+        batch_size = edges.size(0)
+        device = edges.device
+        
+        # Apply output network to ALL edges at once
+        all_edge_outputs = self.net['output'](edges).squeeze(-1)
+        
+        # Apply proportional allocation based on graph structure
+        # For nodes with limited inventory, scale their outgoing edges
+        allocated_outputs = self._apply_proportional_allocation_to_graph(
+            all_edge_outputs, graph_network
         )
-        store_orders = allocations[:, :-1]
-        self_loop_order = allocations[:, -1:]
         
-        return {
-            'warehouses': warehouse_order,
-            'stores': store_orders,
-            'warehouse_self_loop_orders': self_loop_order,
-            'graph_network': graph_network
-        }
+        # Now use mapping to organize the allocated outputs into the return dict
+        outputs = {}
+        
+        # Loop through mapping and extract outputs
+        for output_type, edge_indices in mapping.items():
+            if not edge_indices:  # Skip empty lists
+                continue
+            
+            # Check if edge_indices is 2D (list of lists)
+            if edge_indices and isinstance(edge_indices[0], list):
+                # 2D structure - need to create 2D output tensor
+                n_rows = len(edge_indices)
+                n_cols = max(len(row) for row in edge_indices) if edge_indices else 0
+                result = torch.zeros(batch_size, n_rows, n_cols, device=device)
+                for i, row_edges in enumerate(edge_indices):
+                    for j, edge_idx in enumerate(row_edges):
+                        result[:, i, j] = allocated_outputs[:, edge_idx]
+                outputs[output_type] = result
+            else:
+                # 1D list - just use list indexing
+                outputs[output_type] = allocated_outputs[:, edge_indices]
+        
+        return outputs
+    
+    def _apply_proportional_allocation_to_graph(self, edge_outputs, graph_network):
+        """
+        Apply proportional allocation to edge outputs based on inventory constraints.
+        For each node, scales its outgoing edges proportionally to available inventory.
+        """
+        adjacency = graph_network['adjacency']
+        has_outside_supplier = graph_network['has_outside_supplier']
+        has_demand = graph_network['has_demand']
+        node_inventories = graph_network['node_inventories']
+        
+        allocated_outputs = edge_outputs.clone()
+        n_nodes = adjacency.size(0)
+        
+        # Build edge index mapping for quick lookup
+        edge_idx = 0
+        edge_indices = adjacency.nonzero(as_tuple=False)
+        
+        # Map from source node to list of edge indices
+        node_to_edges = {i: [] for i in range(n_nodes)}
+        
+        # Internal edges
+        for src, _ in edge_indices:
+            node_to_edges[src.item()].append(edge_idx)
+            edge_idx += 1
+        
+        # Skip supplier edges (they don't have inventory constraints)
+        edge_idx += has_outside_supplier.sum().item()
+        
+        # Skip demand edges
+        edge_idx += has_demand.sum().item()
+        
+        # Self-loops
+        supplying_nodes = (adjacency.sum(dim=1) > 0).nonzero(as_tuple=False).squeeze(-1)
+        for node_idx in supplying_nodes:
+            node_to_edges[node_idx.item()].append(edge_idx)
+            edge_idx += 1
+        
+        # Apply proportional allocation for each node with outgoing edges
+        for node_idx, edge_list in node_to_edges.items():
+            if not edge_list:
+                continue
+            
+            # Gather desired allocations for this node's outgoing edges
+            desired_allocations = torch.stack([edge_outputs[:, idx] for idx in edge_list], dim=1)
+            
+            # Get node's available inventory
+            available_inv = node_inventories[:, node_idx]
+            
+            # Apply proportional allocation using the general method
+            scaled_allocations = self.apply_proportional_allocation(desired_allocations, available_inv)
+            
+            # Write back the scaled allocations
+            for i, idx in enumerate(edge_list):
+                allocated_outputs[:, idx] = scaled_allocations[:, i]
+        
+        return allocated_outputs
 
 
 class NeuralNetworkCreator:
