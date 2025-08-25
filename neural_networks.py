@@ -355,51 +355,77 @@ class VanillaSerial(MyNeuralNetwork):
                 } 
 
 
-class VanillaOneWarehouse(MyNeuralNetwork):
+class VanillaWarehouse(MyNeuralNetwork):
     """
-    Fully connected neural network for settings with one warehouse (or transshipment center) and many stores
+    Fully connected neural network for settings with one or many warehouses and many stores
     """
+    
+    def __init__(self, args, scenario=None, device='cpu'):
+        super().__init__(args, device)
+        self.scenario = scenario
+        # Check if this is a transshipment case (warehouse cannot hold inventory)
+        self.transshipment = args.get('transshipment', False)
 
     def forward(self, observation):
         """
         Use store and warehouse inventories and output intermediate outputs for stores and warehouses.
-        For stores, apply softmax to intermediate outputs (concatenated with a 1 when inventory can be held at the warehouse)
-          and multiply by warehouse inventory on-hand
+        For stores, apply softmax to intermediate outputs and multiply by warehouse inventory on-hand.
+        For multiple warehouses, handle store-warehouse adjacency.
         For warehouses, apply sigmoid to intermediate outputs and multiply by warehouse upper bound.
         """
         store_inventories, warehouse_inventories = observation['store_inventories'], observation['warehouse_inventories']
         n_stores = store_inventories.size(1)
+        n_warehouses = warehouse_inventories.size(1)
+        
         input_tensor = torch.cat((store_inventories.flatten(start_dim=1), warehouse_inventories.flatten(start_dim=1)), dim=1)
         intermediate_outputs = self.net['master'](input_tensor)
-        store_intermediate_outputs, warehouse_intermediate_outputs = intermediate_outputs[:, :n_stores], intermediate_outputs[:, n_stores:]
-
-        # Apply softmax to store intermediate outputs
-        # If class name is not VanillaTransshipment, then we will add a column of ones to the softmax inputs (so that inventory can be held at warehouse)
-        store_allocation = \
-            self.apply_softmax_feasibility_function(
-                store_intermediate_outputs, 
-                warehouse_inventories,
-                transshipment=(self.__class__.__name__ == 'VanillaTransshipment')
+        
+        # For single warehouse, create default adjacency (all stores connected)
+        if n_warehouses == 1:
+            warehouse_store_adjacency = torch.ones(1, n_stores, device=store_inventories.device)
+        else:
+            warehouse_store_adjacency = self.scenario.problem_params.get('warehouse_store_adjacency', None)
+            if warehouse_store_adjacency is None:
+                raise ValueError(f"warehouse_store_adjacency matrix required for n_warehouses={n_warehouses}")
+            warehouse_store_adjacency = torch.tensor(warehouse_store_adjacency, dtype=torch.float32, device=store_inventories.device)
+        
+        # We output n_stores * n_warehouses for stores, then n_warehouses for warehouses
+        store_warehouse_outputs = intermediate_outputs[:, :n_stores * n_warehouses]
+        warehouse_intermediate_outputs = intermediate_outputs[:, n_stores * n_warehouses:]
+        
+        # Reshape store outputs to [batch, n_stores, n_warehouses]
+        store_intermediate_outputs = store_warehouse_outputs.view(-1, n_stores, n_warehouses)
+        
+        # Apply softmax allocation for each warehouse, only across connected stores
+        store_allocation = torch.zeros_like(store_intermediate_outputs)
+        
+        for w_idx in range(n_warehouses):
+            # Get connected stores for this warehouse
+            connected_stores = warehouse_store_adjacency[w_idx].nonzero(as_tuple=True)[0]
+            
+            if len(connected_stores) > 0:
+                # Extract outputs for connected stores only
+                connected_outputs = store_intermediate_outputs[:, connected_stores, w_idx]
+                warehouse_inv = warehouse_inventories[:, w_idx:w_idx+1]
+                
+                # Apply softmax allocation across connected stores
+                allocation = self.apply_softmax_feasibility_function(
+                    connected_outputs,
+                    warehouse_inv,
+                    transshipment=self.transshipment
                 )
+                
+                # Place allocation back in the correct positions
+                store_allocation[:, connected_stores, w_idx] = allocation
         
         # Apply sigmoid to warehouse intermediate outputs and multiply by warehouse upper bound
-        warehouse_allocation = self.activation_functions['sigmoid'](warehouse_intermediate_outputs)*(self.warehouse_upper_bound.unsqueeze(1))
-
-        # Reshape store_allocation to [batch, n_stores, n_warehouses] for consistency
-        # n_warehouses = 1 for VanillaOneWarehouse
-        store_allocation = store_allocation.unsqueeze(2)  # [batch, n_stores, 1]
+        warehouse_allocation = self.activation_functions['sigmoid'](warehouse_intermediate_outputs) * self.warehouse_upper_bound
         
         return {
             'stores': store_allocation, 
             'warehouses': warehouse_allocation.unsqueeze(2)
             }
 
-class VanillaTransshipment(VanillaOneWarehouse):
-    """
-    Fully connected neural network for setting with one transshipment center (that cannot hold inventory) and many stores
-    """
-
-    pass
 
 class DataDrivenNet(MyNeuralNetwork):
     """
@@ -1322,8 +1348,17 @@ class NeuralNetworkCreator:
 
     def set_default_output_size(self, module_name, problem_params):
         
+        n_stores = problem_params['n_stores']
+        n_warehouses = problem_params['n_warehouses']
+        
+        # For multiple warehouses, we need outputs for each store-warehouse pair
+        if n_warehouses > 1:
+            master_size = n_stores * n_warehouses + n_warehouses
+        else:
+            master_size = n_stores + n_warehouses
+            
         default_sizes = {
-            'master': problem_params['n_stores'] + problem_params['n_warehouses'], 
+            'master': master_size, 
             'store': 1, 
             'warehouse': 1, 
             'context': None
@@ -1338,8 +1373,7 @@ class NeuralNetworkCreator:
             'capped_base_stock': CappedBaseStock,
             'echelon_stock': EchelonStock,
             'vanilla_serial': VanillaSerial,
-            'vanilla_transshipment': VanillaTransshipment,
-            'vanilla_one_warehouse': VanillaOneWarehouse,
+            'vanilla_warehouse': VanillaWarehouse,
             'data_driven': DataDrivenNet,
             'transformed_nv': TransformedNV,
             'fixed_quantile': FixedQuantile,
@@ -1369,8 +1403,8 @@ class NeuralNetworkCreator:
             if val is None:
                 nn_params_copy['output_sizes'][key] = self.set_default_output_size(key, scenario.problem_params)
 
-        # Special handling for GNN architecture - pass scenario directly
-        if nn_params_copy['name'] == 'gnn':
+        # Special handling for architectures that need scenario
+        if nn_params_copy['name'] in ['gnn', 'vanilla_warehouse']:
             model = self.get_architecture(nn_params_copy['name'])(
                 nn_params_copy,
                 scenario,
