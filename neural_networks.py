@@ -617,10 +617,11 @@ class JustInTime(MyNeuralNetwork):
 
         # For every sample and store, get the demand 'lead_times' periods from now.
         # Does not currently work for backlogged demand setting!
+        # lead_times is 3D [batch, n_stores, n_warehouses], use first warehouse
         future_demands = torch.stack([
             demands[:, j][
                 torch.arange(num_samples), 
-                torch.clip(current_period.to(self.device) + period_shift + lead_times[:, j].long(), max=max_lead_time - 1)
+                torch.clip(current_period.to(self.device) + period_shift + lead_times[:, j, 0].long(), max=max_lead_time - 1)
                 ] 
             for j in range(num_stores)
             ], dim=1
