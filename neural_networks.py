@@ -907,9 +907,15 @@ class GNN(MyNeuralNetwork):
             # Use 2D structure: [n_warehouses][suppliers_per_warehouse] for consistency
             mapping['warehouses'] = [[n_internal_edges - 2]]
             
-            # First echelon orders from supplier (first supplier edge after internal edges)
-            # Use 2D structure: [n_extra_echelons][suppliers_per_echelon] for consistency
-            mapping['echelons'] = [[n_internal_edges]]  # First supplier edge
+            # For echelons: each echelon orders from its upstream
+            # Echelon 0 orders from supplier (supplier edge)
+            # Echelon i (i>0) orders from echelon i-1 (internal edge i-1)
+            mapping['echelons'] = []
+            # First echelon orders from supplier
+            mapping['echelons'].append([n_internal_edges])  # First supplier edge
+            # Other echelons order from upstream echelon (internal edges)
+            for i in range(1, n_extra_echelons):
+                mapping['echelons'].append([i - 1])  # Internal edge from echelon i-1 to echelon i
             
         else:
             # Warehouse-stores network
@@ -1289,7 +1295,7 @@ class GNN(MyNeuralNetwork):
                     result[:, i, j] = allocated_outputs[:, int(edge_idx)]
             
             # Expand to 3D for stores, warehouses, echelons
-            outputs[output_type] = result
+            outputs[output_type] = result.unsqueeze(-1) if result.dim() == 2 else result
         
         return outputs
     
