@@ -20,11 +20,18 @@ sample_data_params:
   'split_by_period': False
 
 problem_params : 
-  'n_stores': 5  # Tested values: 3, 5, 10, 20, 30, 50
-  'n_warehouses': 1
+  'n_stores': 10  # Tested values: 3, 5, 10, 20, 30, 50
+  'n_warehouses': 2  # Multi-warehouse configuration
   'n_extra_echelons': 0
   'lost_demand': True
   'maximize_profit': False
+  # Adjacency matrix defining warehouse-store connections
+  # Rows: warehouses, Columns: stores
+  # 1 = connected, 0 = not connected
+  'warehouse_store_adjacency': [
+    [0, 0, 1, 1, 1, 0, 1, 1, 1, 0],  # Warehouse 0 connections
+    [1, 1, 1, 1, 1, 1, 0, 1, 1, 1]   # Warehouse 1 connections
+  ]
 
 params_by_dataset : 
   'train': 
@@ -66,10 +73,22 @@ store_params:
     'clip': True
     'decimals': 3
   'lead_time': 
-    'sample_across_stores': True
+    'sample_across_stores': False
     'vary_across_samples': False
-    'expand': False
-    'range': [2, 4] # Recall that upper range is excluded from the possible values
+    'expand': True  # This will create a [n_stores, n_warehouses] matrix
+    'value': [
+      # For each store, lead times from [warehouse_0, warehouse_1]
+      [0, 2],  # Store 0: no connection to W0 (0), 2 from W1
+      [0, 1],  # Store 1: no connection to W0 (0), 1 from W1
+      [6, 2],  # Store 2: 6 from W0, 2 from W1
+      [6, 2],  # Store 3: 6 from W0, 2 from W1
+      [6, 1],  # Store 4: 6 from W0, 1 from W1
+      [0, 2],  # Store 5: no connection to W0 (0), 2 from W1
+      [6, 0],  # Store 6: 6 from W0, no connection to W1 (0)
+      [5, 2],  # Store 7: 5 from W0, 2 from W1
+      [6, 2],  # Store 8: 6 from W0, 2 from W1
+      [0, 2]   # Store 9: no connection to W0 (0), 2 from W1
+    ]
   'holding_cost': 
     'sample_across_stores': True 
     'vary_across_samples': False
@@ -86,8 +105,13 @@ store_params:
     'inventory_periods': 3
 
 warehouse_params: 
-  'holding_cost': 0.3
-  'lead_time': 3     
+  # For single warehouse, use scalar values:
+  # 'holding_cost': 0.3
+  # 'lead_time': 3
+  # For multiple warehouses, can use lists or uniform values:
+  'holding_cost': [0.3, 0.4]  # Different costs for each warehouse
+  'lead_time': 3  # Same lead time for all warehouses
+  'edge_cost': [0.5, 1.5]  # Procurement cost per unit ordered from outside supplier     
 
 echelon_params: 
   null

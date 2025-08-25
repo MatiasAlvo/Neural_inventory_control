@@ -208,11 +208,16 @@ class Simulator(gym.Env):
         # If all lead times are the same, we can simplify this step by just adding the allocation to the last
         # column of the inventory tensor and moving all columns "to the left".
         # We leave this method as it is more general!
+        
+        store_orders = action['stores']
+        
+        store_lead_times = observation['lead_times']
+        
         observation['store_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
             store_inventory, 
             post_inventory_on_hand, 
-            action['stores'], 
-            observation['lead_times'], 
+            store_orders, 
+            store_lead_times, 
             self._internal_data['allocation_shift']
             )
         
@@ -235,14 +240,30 @@ class Simulator(gym.Env):
 
         warehouse_inventory = self.observation['warehouse_inventories']
         warehouse_inventory_on_hand = warehouse_inventory[:, :, 0]
-        post_warehouse_inventory_on_hand = warehouse_inventory_on_hand - action['stores'].sum(dim=1).unsqueeze(1)
+        
+        # Calculate store orders per warehouse
+        # action['stores'] is [batch, n_stores, n_warehouses]
+        # Sum across stores to get total orders for each warehouse
+        warehouse_store_orders = action['stores'].sum(dim=1)  # [batch, n_warehouses]
+        
+        post_warehouse_inventory_on_hand = warehouse_inventory_on_hand - warehouse_store_orders
 
         reward = observation['warehouse_holding_costs'] * torch.clip(post_warehouse_inventory_on_hand, min=0)
+        
+        # Add edge costs (procurement costs) if available
+        if 'warehouse_edge_costs' in observation and observation['warehouse_edge_costs'] is not None:
+            # action['warehouses'] is [batch, n_warehouses, n_sources] where n_sources=1 for outside supplier
+            # Sum across sources (dim=2) to get total orders per warehouse
+            warehouse_orders = action['warehouses'].sum(dim=2)  # [batch, n_warehouses]
+            edge_cost_penalty = observation['warehouse_edge_costs'] * warehouse_orders
+            reward = reward + edge_cost_penalty
+        # Expand warehouse_lead_times to 3D to match allocation shape
+        warehouse_lead_times_3d = observation['warehouse_lead_times'].unsqueeze(2)
         observation['warehouse_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
             warehouse_inventory, 
             post_warehouse_inventory_on_hand, 
             action['warehouses'], 
-            observation['warehouse_lead_times'], 
+            warehouse_lead_times_3d, 
             self._internal_data['warehouse_allocation_shift']
             )
 
@@ -255,16 +276,23 @@ class Simulator(gym.Env):
 
         echelon_inventories = self.observation['echelon_inventories']
         echelon_inventory_on_hand = echelon_inventories[:, :, 0]
-        actions_to_subtract = torch.concat([action['echelons'][:, 1:], action['warehouses'].sum(dim=1).unsqueeze(1)], dim=1)
+        # Sum across source dimension (dim=2) for both echelons and warehouses
+        # For echelons, we need orders from echelon i+1 (hence [:, 1:])
+        # For warehouses, we sum all warehouse orders for the last echelon
+        echelon_orders_from_downstream = action['echelons'][:, 1:, :].sum(dim=2)  # Sum across sources
+        warehouse_total_orders = action['warehouses'].sum(dim=(1, 2)).unsqueeze(1)  # Sum across warehouses and sources
+        actions_to_subtract = torch.concat([echelon_orders_from_downstream, warehouse_total_orders], dim=1)
         post_echelon_inventory_on_hand = echelon_inventory_on_hand - actions_to_subtract
 
         reward = observation['echelon_holding_costs'] * torch.clip(post_echelon_inventory_on_hand, min=0)
 
+        # Expand echelon_lead_times to 3D to match allocation shape
+        echelon_lead_times_3d = observation['echelon_lead_times'].unsqueeze(2)
         observation['echelon_inventories'] = self.update_inventory_for_heterogeneous_lead_times(
             echelon_inventories, 
             post_echelon_inventory_on_hand, 
             action['echelons'], 
-            observation['echelon_lead_times'], 
+            echelon_lead_times_3d, 
             self._internal_data['echelon_allocation_shift']
             )
 
@@ -284,6 +312,8 @@ class Simulator(gym.Env):
             observation['warehouse_lead_times'] = data['warehouse_lead_times']
             observation['warehouse_holding_costs'] = data['warehouse_holding_costs']
             observation['warehouse_inventories'] = data['initial_warehouse_inventories']
+            if 'warehouse_edge_costs' in data and data['warehouse_edge_costs'] is not None:
+                observation['warehouse_edge_costs'] = data['warehouse_edge_costs']
         
         if self.problem_params['n_extra_echelons'] > 0:
             observation['echelon_lead_times'] = data['echelon_lead_times']
@@ -365,20 +395,43 @@ class Simulator(gym.Env):
         entire batch. We created allocation_shifts earlier, which dictates the position shift of that long vector
         for each store and each sample. We then add the corresponding lead time to obtain the actual position in 
         which to insert the action
+        
+        Now handles 3D allocation tensors for multi-warehouse scenarios.
         """
         
-        return torch.stack(
+        # Allocation is always 3D: [batch, n_stores, n_warehouses]
+        # Create the base inventory tensor with zeros for new orders
+        # Each warehouse's allocation will be added at its specific lead time position
+        updated_inventory = torch.stack(
             [
                 inventory_on_hand + inventory[:, :, 1], 
                 *self.move_columns_left(inventory, 1, inventory.shape[2] - 1), 
-                torch.zeros_like(allocation)
+                torch.zeros(allocation.shape[0], allocation.shape[1], device=allocation.device, dtype=inventory.dtype)
             ], 
-                dim=2
-                ).put(
-                    (allocation_shifter + lead_times.long() - 1).flatten(),  # Indexes where to 'put' allocation in long vector
-                    allocation.flatten(),  # Values to 'put' in long vector
-                    accumulate=True  # True means adding to existing values, instead of replacing
-                    )
+            dim=2
+        )
+        
+        # Now add each warehouse's contribution with its specific lead time
+        batch_size, n_stores, n_warehouses = allocation.shape
+        
+        # Expand allocation_shifter to handle warehouse dimension
+        # allocation_shifter is [batch, n_stores], need [batch, n_stores, n_warehouses]
+        allocation_shifter_3d = allocation_shifter.unsqueeze(2).expand(-1, -1, n_warehouses)
+        
+        # Flatten everything for the put operation
+        indices = (allocation_shifter_3d + lead_times.long() - 1).flatten()
+        values = allocation.flatten()
+        
+        # Filter out zero allocations to avoid unnecessary operations
+        non_zero_mask = values != 0
+        if non_zero_mask.any():
+            indices = indices[non_zero_mask]
+            values = values[non_zero_mask]
+            # Ensure values have the same dtype as updated_inventory
+            values = values.to(updated_inventory.dtype)
+            updated_inventory = updated_inventory.put(indices, values, accumulate=True)
+        
+        return updated_inventory
 
     def update_past_demands(self, data, observation_params, batch_size, stores, current_period):
         """

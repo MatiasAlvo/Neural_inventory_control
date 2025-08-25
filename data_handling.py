@@ -19,13 +19,15 @@ class Scenario():
         self.demands = self.generate_demand_samples(problem_params, store_params, store_params['demand'], seeds)
         self.underage_costs = self.generate_data_for_samples_and_stores(problem_params, store_params['underage_cost'], seeds['underage_cost'], discrete=False)
         self.holding_costs = self.generate_data_for_samples_and_stores(problem_params, store_params['holding_cost'], seeds['holding_cost'], discrete=False)
-        self.lead_times = self.generate_data_for_samples_and_stores(problem_params, store_params['lead_time'], seeds['lead_time'], discrete=True).to(torch.int64)
+        self.lead_times = self.generate_lead_times(problem_params, store_params['lead_time'], seeds['lead_time'])
+            
         self.means, self.stds = self.generate_means_and_stds(observation_params, store_params)
         self.initial_inventories = self.generate_initial_inventories(problem_params, store_params, self.demands, self.lead_times, seeds['initial_inventory'])
         
         self.initial_warehouse_inventories = self.generate_initial_warehouse_inventory(warehouse_params)
         self.warehouse_lead_times = self.generate_warehouse_data(warehouse_params, 'lead_time')
         self.warehouse_holding_costs = self.generate_warehouse_data(warehouse_params, 'holding_cost')
+        self.warehouse_edge_costs = self.generate_warehouse_data(warehouse_params, 'edge_cost') if warehouse_params and 'edge_cost' in warehouse_params else None
 
         self.initial_echelon_inventories = self.generate_initial_echelon_inventory(echelon_params)
         self.echelon_lead_times = self.generate_echelon_data(echelon_params, 'lead_time')
@@ -34,7 +36,7 @@ class Scenario():
         time_and_sample_features = {'time_features': {}, 'sample_features': {}}
 
         for feature_type, feature_file in zip(['time_features', 'sample_features'], ['time_features_file', 'sample_features_file']):
-            if observation_params[feature_type] and observation_params[feature_file]:
+            if observation_params.get(feature_type) and observation_params.get(feature_file):
                 features = pd.read_csv(observation_params[feature_file])
                 for k in observation_params[feature_type]:
                     tensor_to_append = torch.tensor(features[k].values)
@@ -64,6 +66,7 @@ class Scenario():
                 'initial_warehouse_inventories': self.initial_warehouse_inventories,
                 'warehouse_lead_times': self.warehouse_lead_times,
                 'warehouse_holding_costs': self.warehouse_holding_costs,
+                'warehouse_edge_costs': self.warehouse_edge_costs,
                 'initial_echelon_inventories': self.initial_echelon_inventories,
                 'echelon_holding_costs': self.echelon_holding_costs,
                 'echelon_lead_times': self.echelon_lead_times,
@@ -208,7 +211,7 @@ class Scenario():
         """
         Sample mean and std for normal demand
         """
-
+            
         # Set seed
         np.random.seed(seeds['mean'])
 
@@ -240,9 +243,34 @@ class Scenario():
         elif params_copy['vary_across_samples']:
             return torch.tensor(this_sample_function(*params_copy['range'], self.num_samples)).unsqueeze(1).expand(-1, problem_params['n_stores'])
         elif params_copy['expand']:
-            return torch.tensor(params_copy['value']).expand(self.num_samples, problem_params['n_stores'])
+            # Check if value is a 2D matrix (for warehouse-to-store lead times)
+            value_tensor = torch.tensor(params_copy['value'])
+            if value_tensor.dim() == 2:
+                # This is a [n_stores, n_warehouses] matrix for warehouse-to-store lead times
+                # Expand to [num_samples, n_stores, n_warehouses]
+                return value_tensor.unsqueeze(0).expand(self.num_samples, -1, -1)
+            else:
+                # Original behavior for 1D values
+                return value_tensor.expand(self.num_samples, problem_params['n_stores'])
         else:
             return torch.tensor(params_copy['value'])
+    
+    def generate_lead_times(self, problem_params, lead_time_params, seed):
+        """
+        Generate lead times ensuring proper 3D dimensionality [num_samples, n_stores, n_warehouses]
+        """
+        lead_times_raw = self.generate_data_for_samples_and_stores(problem_params, lead_time_params, seed, discrete=True)
+        
+        if lead_times_raw.dim() == 2:
+            n_warehouses = problem_params.get('n_warehouses', 0)
+            if n_warehouses > 0:
+                lead_times = lead_times_raw.unsqueeze(2).expand(-1, -1, n_warehouses)
+            else:
+                lead_times = lead_times_raw.unsqueeze(2)
+        else:
+            lead_times = lead_times_raw
+        
+        return lead_times.to(torch.int64)
     
     def generate_initial_inventories(self, problem_params, store_params, demands, lead_times, seed):
         """
@@ -256,7 +284,7 @@ class Scenario():
             demand_mults = np.random.uniform(*store_params['initial_inventory']['range_mult'], 
                                              size=(self.num_samples, 
                                                    problem_params['n_stores'], 
-                                                   max(store_params['initial_inventory']['inventory_periods'], lead_times.max()) 
+                                                   max(store_params['initial_inventory']['inventory_periods'], lead_times.max().item()) 
                                                    )
                                             )
             return demand_mean[None, :, None] * demand_mults
@@ -268,15 +296,22 @@ class Scenario():
     
     def generate_initial_warehouse_inventory(self, warehouse_params):
         """
-        Generate initial warehouse inventory data
+        Generate initial warehouse inventory data for multiple warehouses
         """
         if warehouse_params is None:
             return None
         
+        n_warehouses = self.problem_params['n_warehouses']
+        
+        # Handle lead_time as either scalar or list
+        if isinstance(warehouse_params['lead_time'], list):
+            max_lead_time = max(warehouse_params['lead_time'])
+        else:
+            max_lead_time = warehouse_params['lead_time']
+        
         return torch.zeros(self.num_samples, 
-                           1, 
-                           warehouse_params['lead_time']
-                           )
+                           n_warehouses, 
+                           max_lead_time)
     
     def generate_initial_echelon_inventory(self, echelon_params):
         """
@@ -292,13 +327,23 @@ class Scenario():
     
     def generate_warehouse_data(self, warehouse_params, key):
         """
-        Generate warehouse data
-        For now, it is simply fixed across all samples
+        Generate warehouse data for multiple warehouses
+        Supports both scalar values (same for all warehouses) and lists (different per warehouse)
         """
         if warehouse_params is None:
             return None
         
-        return torch.tensor([warehouse_params[key]]).expand(self.num_samples, self.problem_params['n_warehouses'])
+        n_warehouses = self.problem_params['n_warehouses']
+        value = warehouse_params[key]
+        
+        if isinstance(value, list):
+            # Different values for each warehouse
+            if len(value) != n_warehouses:
+                raise ValueError(f"warehouse_params['{key}'] list length {len(value)} doesn't match n_warehouses {n_warehouses}")
+            return torch.tensor(value).unsqueeze(0).expand(self.num_samples, -1)
+        else:
+            # Same value for all warehouses
+            return torch.tensor([value]).expand(self.num_samples, n_warehouses)
     
     def generate_echelon_data(self, echelon_params, key):
         """

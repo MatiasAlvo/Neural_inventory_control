@@ -1,0 +1,43 @@
+trainer_params: 
+  'epochs': 20000
+  'do_dev_every_n_epochs': 10
+  'early_stopping_patience_epochs': 500
+  'print_results_every_n_epochs': 1
+  'save_model': False  # Path to save is defined in main script
+  'epochs_between_save': 10  # Save if cost improved, and at least this number of epochs have passed
+  'choose_best_model_on': 'dev_loss'  # For early stopping, choose according to best performance on this dataset
+  'load_previous_model': False
+  'load_model_path': null
+
+optimizer_params: 
+  'learning_rate': 0.001
+
+nn_params: 
+  'name': 'gnn'
+  'inner_layer_activations': 
+    'initial_node': 'elu'
+    'initial_edge': 'elu'
+    'node_update': 'elu'
+    'edge_update': 'elu'
+    'output': 'elu'
+  'output_layer_activation':
+    'initial_node': 'elu'
+    'initial_edge': 'elu'
+    'node_update': 'elu'
+    'edge_update': 'elu'
+    'output': 'softplus'
+  'neurons_per_hidden_layer':
+    'initial_node': [32, 32]
+    'initial_edge': [32, 32]
+    'node_update': [32, 32]
+    'edge_update': [32, 32]
+    'output': [32, 32]
+  'output_sizes':
+    'initial_node': 32
+    'initial_edge': 32
+    'node_update': 32
+    'edge_update': 32
+    'output': 1
+  'initial_bias':
+    'output': 5.0
+  'gradient_clipping_norm_value': 1.0
