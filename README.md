@@ -99,12 +99,12 @@ The settings considered are the following:
 The policy classes we consider are the following:
 - `base_stock`: Base stock policy (optimal for the setting of one store under a backlogged demand assumption).
 - `capped_base_stock`: Capped base stock policy (well-performing for the setting of one store under a lost demand assumption).
-- `data_driven_net`: Defines a direct mapping from time-series data (previous demands) and current inventory on-hand to an order amount. In our paper, we refer to it as HDPO (end-to-end) in the section "HDPO with real time series data". This policy class can be modified to utilize a different set of features.
+- `data_driven_net`: Defines a direct mapping from time-series data (previous demands) and current inventory on-hand to an order amount. In our paper, we refer to it as HDPO (end-to-end) in the section "HDPO with real time series data". Supports both single and multiple warehouse configurations with store-warehouse adjacency.
 - `echelon_stock`: Echelon stock policy (optimal for a serial system under a backlogged demand assumption).
 - `fixed_quantile`: Generalized newsvendor policy, that utilizes the same quantile for each scenario.
 - `gnn`: Graph Neural Network for multi-warehouse and serial system settings, using message passing between nodes to model supply chain dynamics. Supports flexible network topologies defined by adjacency matrices.
 - `gnn_transshipment`: GNN configured for transshipment mode where warehouses cannot hold inventory (uses `gnn` with `transshipment: True` in config).
-- `just_in_time`: Non-admissible oracle policy, that looks into the future and orders to precisely meet future demand.
+- `just_in_time`: Non-admissible oracle policy, that looks into the future and orders to precisely meet future demand. Supports both single and multiple warehouse configurations with store-warehouse adjacency.
 - `quantile_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]).
 - `returns_nv`: Generalized newsvendor policy, that utilizes the newsvendor quantile (p/[p+h]), but allows for negative orders. It defines a non-admissible policy.
 - `transformed_nv`: Generalized newsvendor policy, that considers a flexible mapping from newsvendor quantile (p/[p+h]) to a new quantile. This quantile is therefore different across scenarios, but fixed across time for each scenario.
@@ -118,7 +118,7 @@ To create a new policy class, follow these steps:
 1. Open the `neural_networks.py` file.
 2. Inside `neural_networks.py`, create a new class that inherits from `MyNeuralNetwork`. Define the `forward` method within this class to specify the forward pass of your neural network architecture.
 3. In the `get_architecture` method of the `NeuralNetworkCreator` class (located in neural_networks.py), add your newly created neural network to the dictionary of architectures.
-4. Finally, create a config file for your policy class under `config/files/policies_and_hyperparams`. This config should define the necessary parameters to instantiate your policy, as well as other parameters (to be defined below).
+4. Finally, create a config file for your policy class under `config_files/policies_and_hyperparams`. This config should define the necessary parameters to instantiate your policy, as well as other parameters (to be defined below).
 
 ## Populating a config file
 

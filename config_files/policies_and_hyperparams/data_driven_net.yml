@@ -23,5 +23,5 @@ nn_params:
   'initial_bias':
     'master': 1.0
   'output_sizes':
-    'master': 1
+    'master': null
 

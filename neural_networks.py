@@ -429,25 +429,90 @@ class VanillaWarehouse(MyNeuralNetwork):
 
 class DataDrivenNet(MyNeuralNetwork):
     """
-    Fully connected neural network
+    Fully connected neural network for data-driven ordering.
+    Supports both single and multiple warehouse configurations.
     """
+    
+    def __init__(self, args, scenario=None, device='cpu'):
+        super().__init__(args, device)
+        self.scenario = scenario
     
     def forward(self, observation):
         """
-        Utilize inventory on-hand, past demands, underage costs, and days from Christmas to output store orders directly
+        Utilize inventory information and demand features to output orders.
+        For real data: uses past demands, underage costs, days from Christmas.
+        For synthetic data: uses mean and std demand parameters.
         """
-
-        # Input tensor is given by full store inventories, past demands, underage costs for 
-        # each sample path, and days from Christmas
-        # Lead times are 3D [batch, n_stores, n_warehouses], use first warehouse
-        lead_times_2d = observation['lead_times'][:, :, 0]
-        input_tensor = self.flatten_then_concatenate_tensors(
-                [observation['store_inventories']] + 
-                [observation[key] for key in ['past_demands', 'underage_costs', 'days_from_christmas']] +
-                [lead_times_2d]
-            )
-
-        return {'stores': self.net['master'](input_tensor).unsqueeze(2)}
+        
+        # Check if we have multiple warehouses
+        n_warehouses = observation['warehouse_inventories'].size(1) if 'warehouse_inventories' in observation else 0
+        n_stores = observation['store_inventories'].size(1)
+        
+        # Build input features list
+        input_features = [observation['store_inventories']]
+        
+        # Add warehouse inventories if present
+        if n_warehouses > 0:
+            input_features.append(observation['warehouse_inventories'])
+        
+        # Add demand-related features (data driven is always real data)
+        input_features.extend([
+            observation['past_demands'],
+            observation['underage_costs'],
+            observation['holding_costs']
+        ])
+        # Always include days from Christmas
+        input_features.append(observation['days_from_christmas'])
+        
+        # Add lead times
+        # Always include full 3D lead time matrix [batch, n_stores, n_warehouses]
+        input_features.append(observation['lead_times'])
+        
+        # Flatten and concatenate all features
+        input_tensor = self.flatten_then_concatenate_tensors(input_features)
+        
+        # Get outputs from network
+        if n_warehouses > 0:
+            # One or more warehouses: need to handle store allocations per warehouse
+            outputs = self.net['master'](input_tensor)
+            
+            # Get warehouse-store adjacency from scenario
+            warehouse_store_adjacency = self.scenario.problem_params['warehouse_store_adjacency']
+            adjacency_tensor = torch.tensor(warehouse_store_adjacency, dtype=torch.float32, device=outputs.device)
+            edge_mask = adjacency_tensor.transpose(0, 1)  # [n_stores, n_warehouses]
+            
+            # Network outputs n_warehouses + n_stores * n_warehouses values
+            warehouse_outputs = outputs[:, :n_warehouses]
+            store_outputs_flat = outputs[:, n_warehouses:]
+            
+            # Reshape and apply mask
+            store_outputs_all = store_outputs_flat.reshape(outputs.size(0), n_stores, n_warehouses)
+            
+            # Apply adjacency mask to zero out non-connected pairs
+            edge_mask_batch = edge_mask.unsqueeze(0).expand(outputs.size(0), -1, -1)
+            store_allocation = store_outputs_all * edge_mask_batch
+            
+            # Apply proportional allocation if warehouse inventory is limited
+            final_store_allocation = torch.zeros_like(store_allocation)
+            for w_idx in range(n_warehouses):
+                connected_stores_mask = edge_mask[:, w_idx]  # [n_stores]
+                if connected_stores_mask.sum() > 0:
+                    # Get allocations for this warehouse
+                    warehouse_allocations = store_allocation[:, :, w_idx]
+                    # Apply proportional allocation based on available inventory
+                    allocated = self.apply_proportional_allocation(
+                        warehouse_allocations,
+                        observation['warehouse_inventories'][:, w_idx]
+                    )
+                    final_store_allocation[:, :, w_idx] = allocated
+            
+            return {
+                'stores': final_store_allocation,
+                'warehouses': warehouse_outputs.unsqueeze(2)
+            }
+        else:
+            # Single warehouse or no warehouse
+            return {'stores': self.net['master'](input_tensor).unsqueeze(2)}
 
 class QuantilePolicy(MyNeuralNetwork):
     """
@@ -572,34 +637,103 @@ class JustInTime(MyNeuralNetwork):
     Can be considered as an "oracle policy"
     """
 
-    def __init__(self, args, device='cpu'):
+    def __init__(self, args, scenario=None, device='cpu'):
         super().__init__(args=args, device=device) # Initialize super class
+        self.scenario = scenario
         self.trainable = False
 
     def forward(self, observation):
         """
         Get store allocation by looking into the future and ordering so that units arrive just-in-time to satisfy demand
+        Supports both single and multiple warehouse configurations.
         """
         
-        current_period, lead_times \
-            = self.unpack_args(observation, ["current_period", "lead_times"])
+        current_period = observation['current_period']
         demands, period_shift = self.unpack_args(observation['internal_data'], ["demands", "period_shift"])
-    
+        
         num_samples, num_stores, max_lead_time = demands.shape
-
-        # For every sample and store, get the demand 'lead_times' periods from now.
-        # Does not currently work for backlogged demand setting!
-        # lead_times is 3D [batch, n_stores, n_warehouses], use first warehouse
-        future_demands = torch.stack([
-            demands[:, j][
-                torch.arange(num_samples), 
-                torch.clip(current_period.to(self.device) + period_shift + lead_times[:, j, 0].long(), max=max_lead_time - 1)
+        
+        # Check if we have warehouses
+        n_warehouses = observation['warehouse_inventories'].size(1) if 'warehouse_inventories' in observation else 0
+        # Handle no warehouse case first
+        if n_warehouses == 0:
+            # No warehouse case (stores only)
+            lead_times = observation['lead_times'][:, :, 0]  # Use first warehouse
+            
+            future_demands = torch.stack([
+                demands[:, j][
+                    torch.arange(num_samples), 
+                    torch.clip(
+                        current_period.to(self.device) + period_shift + lead_times[:, j].long(),
+                        max=max_lead_time - 1
+                    )
                 ] 
-            for j in range(num_stores)
-            ], dim=1
-            )
-
-        return {"stores": torch.clip(future_demands, min=0).unsqueeze(2)}
+                for j in range(num_stores)
+            ], dim=1)
+            
+            return {"stores": torch.clip(future_demands, min=0).unsqueeze(2)}
+        
+        # One or more warehouses case
+        # lead_times is 3D [batch, n_stores, n_warehouses]
+        lead_times = observation['lead_times']
+        warehouse_lead_times = observation['warehouse_lead_times']  # [batch, n_warehouses]
+        
+        # Get warehouse-store adjacency matrix
+        warehouse_store_adjacency = self.scenario.problem_params['warehouse_store_adjacency']
+        adjacency_tensor = torch.tensor(warehouse_store_adjacency, dtype=torch.float32, device=lead_times.device)
+        
+        # Initialize output tensors
+        store_allocation = torch.zeros(num_samples, num_stores, n_warehouses, device=lead_times.device)
+        warehouse_orders = torch.zeros(num_samples, n_warehouses, device=lead_times.device)
+        
+        # For each store, find its connected warehouse and calculate orders
+        for store_idx in range(num_stores):
+            # Find connected warehouses for this store
+            connected_warehouses = adjacency_tensor[:, store_idx].nonzero(as_tuple=True)[0]
+            
+            if len(connected_warehouses) > 0:
+                # Pick the first connected warehouse (or could pick based on shortest lead time)
+                w_idx = connected_warehouses[0].item()
+                
+                
+                # Calculate what the store needs to order from this warehouse
+                # Orders placed now arrive at current_period + lead_time
+                store_demand_time = torch.clip(
+                    current_period.to(self.device) + lead_times[:, store_idx, w_idx].long() + period_shift,
+                    max=max_lead_time - 1
+                )
+                
+                store_future_demand = demands[:, store_idx][
+                    torch.arange(num_samples), 
+                    store_demand_time
+                ]
+                
+                # Assign this demand to the warehouse-store allocation
+                store_allocation[:, store_idx, w_idx] = store_future_demand
+                
+                
+                # Calculate what the warehouse needs to order from supplier
+                # Orders placed now arrive at warehouse at current_period + warehouse_lead_time
+                # Then take lead_time more to reach store
+                warehouse_demand_time = torch.clip(
+                    current_period.to(self.device) + 
+                    warehouse_lead_times[:, w_idx].long() + lead_times[:, store_idx, w_idx].long() + period_shift,
+                    max=max_lead_time - 1
+                )
+                
+                warehouse_future_demand = demands[:, store_idx][
+                    torch.arange(num_samples),
+                    warehouse_demand_time
+                ]
+                
+                # Add to warehouse orders (accumulate for all stores connected to this warehouse)
+                warehouse_orders[:, w_idx] += warehouse_future_demand
+                
+        
+        return {
+            "stores": torch.clip(store_allocation, min=0),
+            "warehouses": torch.clip(warehouse_orders, min=0).unsqueeze(2)  # [batch, n_warehouses, 1]
+        }
 
 class GNN(MyNeuralNetwork):
     """
@@ -733,13 +867,26 @@ class GNN(MyNeuralNetwork):
         
         # Store features last
         store_inv_len = observation['store_inventories'].size(-1)
-        store_features = torch.cat([
+        store_feature_list = [
             observation['store_inventories'],
             observation['holding_costs'].unsqueeze(-1),
             observation['underage_costs'].unsqueeze(-1),
-            observation['mean'].unsqueeze(-1),
-            observation['std'].unsqueeze(-1),
-        ], dim=-1)
+        ]
+        
+        # Add demand distribution features
+        if 'past_demands' in observation:
+            # Real data case - include past demands and days from christmas
+            store_feature_list.append(observation['past_demands'])
+            if 'days_from_christmas' in observation:
+                store_feature_list.append(observation['days_from_christmas'].unsqueeze(-1))
+        else:
+            # Synthetic data case - include mean and std
+            store_feature_list.extend([
+                observation['mean'].unsqueeze(-1),
+                observation['std'].unsqueeze(-1),
+            ])
+        
+        store_features = torch.cat(store_feature_list, dim=-1)
         features_list.append(store_features)
         inv_lengths.append(store_inv_len)
         
@@ -1404,7 +1551,7 @@ class NeuralNetworkCreator:
                 nn_params_copy['output_sizes'][key] = self.set_default_output_size(key, scenario.problem_params)
 
         # Special handling for architectures that need scenario
-        if nn_params_copy['name'] in ['gnn', 'vanilla_warehouse']:
+        if nn_params_copy['name'] in ['gnn', 'vanilla_warehouse', 'just_in_time', 'data_driven']:
             model = self.get_architecture(nn_params_copy['name'])(
                 nn_params_copy,
                 scenario,
