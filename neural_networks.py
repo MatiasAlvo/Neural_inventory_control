@@ -692,8 +692,12 @@ class JustInTime(MyNeuralNetwork):
             connected_warehouses = adjacency_tensor[:, store_idx].nonzero(as_tuple=True)[0]
             
             if len(connected_warehouses) > 0:
-                # Pick the first connected warehouse (or could pick based on shortest lead time)
-                w_idx = connected_warehouses[0].item()
+                # Pick the warehouse with shortest lead time for this store
+                # Get lead times for all connected warehouses for this store
+                store_lead_times_to_warehouses = lead_times[:, store_idx, connected_warehouses]
+                # Find the warehouse index with minimum lead time (averaged across batch)
+                min_lead_time_idx = torch.argmin(store_lead_times_to_warehouses.mean(dim=0))
+                w_idx = connected_warehouses[min_lead_time_idx].item()
                 
                 
                 # Calculate what the store needs to order from this warehouse
