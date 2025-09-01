@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug with Args",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main_run.py",
+            "console": "integratedTerminal",
+            "python": "/user/ma4177/.conda/envs/neural_inventory_control/bin/python",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "2"
+            },
+            "args": ["train", "one_warehouse_lost_demand", "gnn"]
+        }
+    ]
+}

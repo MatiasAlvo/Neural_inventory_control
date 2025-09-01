@@ -27,22 +27,22 @@ problem_params :
   'n_warehouses': 1
   'n_extra_echelons': 0
   'lost_demand': True
-  'maximize_profit': False
+  'maximize_profit': True
 
 params_by_dataset : 
   'train': 
     'n_samples': 8192  # Tested values: 16, 256, 8192 for vanilla and symmetry-aware (for sym-aware, additionally 2, 4, 8)
-    'batch_size': 1024 
+    'batch_size': 512 
     'periods': 50 
     'ignore_periods': 30 
   'dev': 
     'n_samples': 4096 
-    'batch_size': 1024 
+    'batch_size': 512 
     'periods': 50 
     'ignore_periods': 30 
   'test': 
     'n_samples': 4096 
-    'batch_size': 1024 
+    'batch_size': 512 
     'periods': 500 
     'ignore_periods': 300
 

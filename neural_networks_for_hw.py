@@ -623,7 +623,7 @@ class GNN(MyNeuralNetwork):
 
     def forward(self, observation):
 
-        # Inner utility function for padding tensors to a uniform size.
+
         def pad_features(tensor, inv_len, max_inv_len, max_states_len):
             inv = tensor[:,:,:inv_len]
             states = tensor[:,:,inv_len:]
@@ -631,107 +631,59 @@ class GNN(MyNeuralNetwork):
                 F.pad(inv, (0, max_inv_len - inv_len)),
                 F.pad(states, (0, max_states_len - (tensor.size(2) - inv_len)))
             ], dim=2)
-
-        # =================================================================================
-        # START OF DUMMY STORE MASKING IMPLEMENTATION
-        # =================================================================================
-
-        # --- Step 1: Dynamic Store Mask Creation ---
-        # The goal is to create a mask to nullify computations for dummy stores, which are
-        # used as padding to maintain a constant tensor size across the batch.
-
-        # Get a tensor of shape [batch_size] indicating the number of REAL stores
-        # for each scenario in the batch.
-        num_real_stores = observation['num_real_stores'][:, 0]
-
-        # Create a range tensor of shape [batch_size, self.n_stores]. Each row will be
-        # [0, 1, 2, ..., n_stores-1]. This enables efficient, vectorized comparison.
-        range_tensor = torch.arange(self.n_stores, device=self.device).expand(num_real_stores.shape[0], -1)
         
-        # The comparison `range_tensor < num_real_stores` yields a boolean mask.
-        # `unsqueeze(1)` aligns dimensions for broadcasting: [batch_size, 1].
-        # The result, `store_mask`, has a shape of [batch_size, self.n_stores] and is
-        # True for real stores and False for dummy stores.
-        store_mask = range_tensor < num_real_stores.unsqueeze(1)
         
-        # Convert the boolean mask to a float tensor (True->1.0, False->0.0) and
-        # add a feature dimension. This prepares it for element-wise multiplication
-        # with state/embedding tensors. Final shape: [batch_size, self.n_stores, 1].
-        store_mask_float = store_mask.unsqueeze(-1).float()
-        mask_0 = store_mask_float[0]
-
-        # --- End of Step 1 ---
+        # TODO: mask state entries corresponding to dummy stores in store state
+        # be careful with division by sqrt(n_stores) normalization factor
+        # zero out dummy stores in store allocation
+        # you can access the number of real stores for each scenario with observation['num_real_stores'][:, 0]
 
         store_inv_len = observation['store_inventories'].size(2)
         warehouse_inv_len = observation['warehouse_inventories'].size(2)
         n_warehouses = observation['warehouse_inventories'].size(1)
 
+        # get states
         store_state = self.get_store_inventory_and_params(observation)
 
-        # --- Step 2: Apply Mask to Initial Store State ---
-        # We zero out all features of the dummy stores. This is crucial to ensure
-        # they do not contribute any information from the beginning of the forward pass.
-        store_state = store_state * store_mask_float
-        store_state_0 = store_state[0]
         
         warehouse_state = self.get_warehouse_inventory_and_params(observation)
-        
-        # (Original padding and state preparation code remains unchanged)
         max_inv_len = max(store_inv_len, warehouse_inv_len)
+
+        # get problem primitives/parameters
         store_primitives_len = store_state.size(2) - store_inv_len
         warehouse_primitives_len = warehouse_state.size(2) - warehouse_inv_len
         max_primitives_len = max(store_primitives_len, warehouse_primitives_len)
+
+        # fill with zeros to make all states have the same length
         store_padded = pad_features(store_state, store_inv_len, max_inv_len, max_primitives_len)
         warehouse_padded = pad_features(warehouse_state, warehouse_inv_len, max_inv_len, max_primitives_len)
+
         states = torch.cat([warehouse_padded, store_padded], dim=1)
-        
         n_MP = 1
         if self.n_MP is not None:
             n_MP = self.n_MP
         
+        # here is where we embed the nodes
         nodes = self.net['initial_node'](states)
 
-        # (Edge creation code remains unchanged)
+        # get edges for each location
         supplier_warehouse_edges_input = torch.cat([torch.zeros_like(nodes[:, :1]), nodes[:, :1], observation['warehouse_lead_times'].unsqueeze(-1)], dim=-1)
         warehouse_store_edges_input = torch.cat([nodes[:, :1].repeat(1, self.n_stores, 1), nodes[:, 1:], observation['lead_times'].unsqueeze(-1)], dim=-1)
         store_clients_edges_input = torch.cat([nodes[:, 1:], torch.zeros_like(nodes[:, 1:]), torch.zeros_like(observation['lead_times'].unsqueeze(-1))], dim=-1)
+        
+        # embed edges
         edges_input = torch.cat([supplier_warehouse_edges_input, warehouse_store_edges_input, store_clients_edges_input], dim=1)
         edges = self.net['initial_edge'](edges_input)
-        # Create the mask - expand store_mask to match edge dimensions
-        edge_mask = store_mask.unsqueeze(-1).float()  # [batch_size, n_stores, 1]
 
-        # Message Passing Loop
         for layer_idx in range(n_MP):
             edges_for_aggregation = edges
-            # edges_for_aggregation_0 = edges_for_aggregation[0]
-            # edges_for_aggregation[:, 1:1 + self.n_stores, :] *= edge_mask
-            # edges_for_aggregation_0 = edges_for_aggregation[0]
-
-            # print(edges_for_aggregation.shape)
-            # raise Exception("Stop here")
             warehouse_supplier_aggregation = edges_for_aggregation[:, :1, :]
 
-            # --- Step 3: Correct Normalization in Message Aggregation ---
-            # The warehouse aggregates messages from stores. The original normalization divided
-            # by sqrt(self.n_stores), which is incorrect for variable-size batches. The correct
-            # normalization must use the REAL number of stores in each scenario to ensure
-            # the scale of aggregated messages is consistent.
-            
-            # Reshape `num_real_stores` to [batch_size, 1, 1] for broadcasting.
-            num_real_stores_for_div = num_real_stores.view(-1, 1, 1)
-            
-            # Use `clamp(min=1)` as a robust safeguard against division by zero in the edge
-            # case of a scenario having no stores.
-            normalization_factor = torch.sqrt(num_real_stores_for_div.clamp(min=1))
-
-            warehouse_recipient_aggregation = torch.sum(edges_for_aggregation[:, 1:1 + self.n_stores, :], dim=1, keepdim=True) / normalization_factor
-            
-            # --- End of Step 3 ---
+            warehouse_recipient_aggregation = torch.sum(edges_for_aggregation[:, 1:1 + self.n_stores, :], dim=1, keepdim=True) / torch.sqrt(torch.tensor(self.n_stores, device=self.device))
                 
             store_supplier_aggregation = edges_for_aggregation[:, 1:1 + self.n_stores, :]
             store_recipient_aggregation = edges_for_aggregation[:, 1 + self.n_stores:1 + 2 * self.n_stores, :]
 
-            # (Node and edge update code remains unchanged)
             node_update_input = torch.cat(
                 [torch.cat([nodes[:, :1], warehouse_supplier_aggregation, warehouse_recipient_aggregation], dim=-1),
                     torch.cat([nodes[:, 1:], store_supplier_aggregation, store_recipient_aggregation], dim=-1)],
@@ -742,34 +694,23 @@ class GNN(MyNeuralNetwork):
 
             supplier_warehouse_edges_update_input = torch.cat([edges[:, :1], torch.zeros_like(nodes[:, :1]), nodes[:, :1]], dim=-1)
             warehouse_store_edges_update_input = torch.cat([edges[:, 1:1 + self.n_stores], nodes[:, :1].repeat(1, self.n_stores, 1), nodes[:, 1:]], dim=-1)
+            
             store_clients_edges_update_input = torch.cat([edges[:, 1 + self.n_stores:1 + 2 * self.n_stores], nodes[:, 1:], torch.zeros_like(nodes[:, 1:])], dim=-1)
+            
             edges_update_input = torch.cat([supplier_warehouse_edges_update_input, warehouse_store_edges_update_input, store_clients_edges_update_input], dim=1)
+
             edges_updates = self.get_network('edge_update', layer_idx)(edges_update_input)
             edges = edges + edges_updates
 
-        # Final output calculation
         outputs = self.net['output'](edges[:, :1 + self.n_stores, :])
 
-        # --- Step 4: Apply Mask to Outputs ---
-        # Before the final allocation, we ensure that dummy stores do not have any
-        # "bids" for inventory.
-        store_intermediate_outputs = outputs[:, 1:] * store_mask_float
-        
+        store_intermediate_outputs = outputs[:, 1:]
         warehouse_allocation = outputs[:, :1, 0]
 
         store_allocation = self.apply_proportional_allocation(
             store_intermediate_outputs[:,:,0], 
             observation['warehouse_inventories'],
-        )
-
-        # As a best practice, we apply the mask again to the final output to guarantee
-        # that allocations to dummy stores are exactly zero after the proportional
-        # allocation layer.
-        store_allocation = store_allocation * store_mask.float()
-        
-        # ===============================================================================
-        # END OF IMPLEMENTATION
-        # ===============================================================================
+            )
 
         result = {
             'stores': store_allocation,
