@@ -259,6 +259,63 @@ class DataDrivenNet(MyNeuralNetwork):
         # Single warehouse or no warehouse
         return {'stores': self.net['master'](input_tensor).unsqueeze(2)}
 
+class DataDrivenNetWithForecasts(MyNeuralNetwork):
+    """
+    Fully connected neural network for data-driven ordering with LGBM forecast features.
+    Extends DataDrivenNet by incorporating forecast features from the data pipeline.
+    Supports both single and multiple warehouse configurations.
+    """
+    
+    def __init__(self, args, scenario=None, device='cpu'):
+        super().__init__(args, device)
+        self.scenario = scenario
+    
+    def forward(self, observation):
+        """
+        Utilize inventory information, demand features, and LGBM forecasts to output orders.
+        For real data: uses past demands, underage costs, days from Christmas, and forecast features.
+        For synthetic data: uses mean and std demand parameters.
+        """
+        # Build input features list (same as DataDrivenNet)
+        input_features = [observation['store_inventories']]
+        
+        # Add demand-related features (data driven is always real data)
+        input_features.extend([
+            observation['past_demands'],
+        ])
+        
+        # Add instock features if available
+        if 'past_instocks' in observation:
+            input_features.append(observation['past_instocks'])
+        
+        # Add time product features if available
+        time_product_feature_keys = [k for k in observation.keys() if k.startswith('past_time_product_feature_')]
+        for key in sorted(time_product_feature_keys):  # Sort to ensure consistent ordering
+            input_features.append(observation[key])
+        
+        # Add all time features specified in observation_params
+        if hasattr(self, 'scenario') and self.scenario and 'observation_params' in self.scenario.__dict__:
+            time_features_list = self.scenario.observation_params.get('time_features', [])
+            for feature_name in time_features_list:
+                if feature_name in observation:
+                    input_features.append(observation[feature_name])
+        
+        # Add product features if available - need to expand to match other features
+        if 'product_features' in observation:
+            product_features = observation['product_features'].clone()
+            product_features_expanded = product_features
+            input_features.append(product_features_expanded)
+        
+        # Add LGBM forecast features if available (now from observation, not loaded in NN)
+        if 'forecast_features' in observation:
+            input_features.append(observation['forecast_features'])
+        
+        # Flatten and concatenate all features
+        input_tensor = self.flatten_then_concatenate_tensors(input_features)
+        
+        # Single warehouse or no warehouse
+        return {'stores': self.net['master'](input_tensor).unsqueeze(2)}
+
 class MeanLastXBaseline(MyNeuralNetwork):
     """
     Weekly mean-of-last-X baseline:
@@ -464,7 +521,9 @@ class NeuralNetworkCreator:
 
         architectures = {
             'data_driven': DataDrivenNet,
+            'data_driven_with_forecasts': DataDrivenNetWithForecasts,
             'mean_last_x': MeanLastXBaseline,
+            'just_in_time': JustInTime,
             }
         return architectures[name]
     
@@ -488,7 +547,7 @@ class NeuralNetworkCreator:
                 nn_params_copy['output_sizes'][key] = self.set_default_output_size(key, scenario.problem_params)
 
         # Special handling for architectures that need scenario
-        if nn_params_copy['name'] in ['gnn', 'vanilla_warehouse', 'just_in_time', 'data_driven']:
+        if nn_params_copy['name'] in ['gnn', 'vanilla_warehouse', 'just_in_time', 'data_driven', 'data_driven_with_forecasts']:
             model = self.get_architecture(nn_params_copy['name'])(
                 nn_params_copy,
                 scenario,

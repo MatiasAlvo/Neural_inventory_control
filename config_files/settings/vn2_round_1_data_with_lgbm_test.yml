@@ -1,0 +1,151 @@
+seeds : 
+  'underage_cost': 28 
+  'holding_cost': 73 
+  'mean': 33
+  'coef_of_var': 92 
+  'lead_time': 41 
+  'demand': 57 
+  'initial_inventory': 4839
+
+test_seeds :  # Seeds for test set
+  'underage_cost': 36 
+  'holding_cost': 81 
+  'mean': 41 
+  'coef_of_var': 100
+  'lead_time': 49
+  'demand': 65
+  'initial_inventory': 4839
+
+sample_data_params: # define the periods to consider for train, dev and test sets
+  'split_by_period': True
+  'train_periods': (0, 148)
+  'dev_periods': (149, 157)
+  'test_periods': (149, 157)
+
+problem_params : 
+  'n_stores': 1
+  'n_warehouses': 0
+  'n_extra_echelons': 0
+  'lost_demand': True
+  'maximize_profit': True # False mean minimizing cost, True means maximizing profit
+
+params_by_dataset : 
+  'train': 
+    'n_samples': 599 # set equal to the number of rows in sales data!
+    'batch_size': 100 
+    'periods': 147 # set equal to the number of periods in "train_periods" - (period_shift + 1)
+    'ignore_periods': 2 # number of periods to ignore for reporting!
+  'dev': 
+    'n_samples': 599 # set equal to the number of rows in sales data!
+    'batch_size': 599
+    'periods': 8 # set equal to the number of periods in "dev_periods" - (period_shift + 1)
+    'ignore_periods': 2 # number of periods to ignore for reporting!
+  'test': 
+    'n_samples': 599 # set equal to the number of rows in sales data!
+    'batch_size': 599 
+    'periods': 8 # set equal to the number of periods in "test_periods" - (period_shift + 1)
+    'ignore_periods': 2 # number of periods to ignore for reporting!
+
+observation_params:
+  'include_warehouse_inventory': False
+  'include_static_features':
+    'holding_costs': True 
+    'underage_costs': True 
+    'lead_times': True 
+    'upper_bounds': False
+  'demand': 
+    'past_periods': 1 # number of periods to look back for demand! ie how many periods are given to the neural network policy as input
+    'period_shift': 0 # start x periods after the first period in the dataset
+  'instock': # set past_periods to 0 if you don't want to use!
+    'past_periods': 0 # number of periods to look back for instock! ie how many periods are given to the neural network policy as input
+    'period_shift': 0 # start x periods after the first period in the dataset 
+  # 'time_product_features_tensor':  # comment out if you don't want to use time product features!
+  #   'past_periods': 16 # Use same number of periods as demand and instock
+  #   'period_shift': 0 # start x periods after the first period in the dataset
+  # 'product_features': # comment out if you don't want to use product features. If you set an empty list, it will raise an error! (i need to fix this bug)
+  #   'features': ['Store', 'Product']  # currently can use ['Store', 'Product', 'ProductGroup', 'Division', 'Department', 'DepartmentGroup', 'StoreFormat', 'Format']
+  'time_features_file': 'vn2_processed_data/data_with_lgbm/date_features.csv'
+  # set an empty list if you don't want to use time features! If you comment out from the file, it will raise an error!
+  'time_features': []
+  # 'time_features': ['days_from_christmas', 'day_of_month', 'month_1', 'month_2', 'month_3', 'month_4', 'month_5', 'month_6', 'month_7', 'month_8', 'month_9', 'month_10', 'month_11', 'month_12']
+  'sample_features': null
+  'forecast_features': # Add forecast features from LGBM predictions
+    'file_location': 'vn2_processed_data/data_with_lgbm/forecasts_raw.pt'
+
+store_params: 
+  'demand': 
+    'distribution': 'real'
+    'file_location': 'vn2_processed_data/data_with_lgbm/sales.pt'
+    'sample_across_stores': False
+    'expand': False
+    'clip': False
+    'decimals': 3
+  # 'instock': # set past_periods to 0 if you don't want to use! but dont comment out
+  #   'file_location': 'vn2_processed_data/data_with_lgbm/stock.pt'
+  #   'sample_across_stores': False
+  #   'expand': False
+  #   'clip': False
+  #   'decimals': 3
+  # 'time_product_features_tensor':  # comment out if you don't want to use time product features!
+  #   'file_location': 'vn2_processed_data/data_with_lgbm/time_product_features.pt'
+  #   'sample_across_stores': False
+  #   'expand': False
+  #   'clip': False
+  #   'decimals': 3
+  # 'product_features': # comment out if you don't want to use product features. If you set an empty list, it will raise an error! (i need to fix this bug)
+  #   'file_location': 'vn2_processed_data/data_with_lgbm/product_features.csv'
+  #   'features': ['Store', 'Product'] # currently can use ['Store', 'Product', 'ProductGroup', 'Division', 'Department', 'DepartmentGroup', 'StoreFormat', 'Format']
+  'lead_time': 
+    'sample_across_stores': False
+    'vary_across_samples': False
+    'expand': True
+    'value': 2
+  'holding_cost': 
+    'sample_across_stores': False 
+    'vary_across_samples': False
+    'expand': True
+    'value': 0.2
+  'underage_cost': 
+    'sample_across_stores': False
+    'vary_across_samples': False 
+    'expand': True
+    'value': 1.0
+  'initial_inventory': 
+    'sample': False
+    'inventory_periods': 2
+
+warehouse_params: 
+  null
+
+echelon_params: 
+  null
+
+# Neural network configuration with forecast features
+nn_params:
+  'name': 'data_driven_with_forecasts'
+  'inner_layer_activations': 
+    'master': 'elu'
+  'output_layer_activation':
+    'master': 'relu'
+  'neurons_per_hidden_layer': 
+    # 'master': [2000, 2000, 2000]
+    'master': [64, 64]
+  'initial_bias':
+    'master': 1.0
+  'output_sizes':
+    'master': null
+
+# Training configuration
+trainer_params : 
+  'epochs': 20000 
+  'do_dev_every_n_epochs': 1
+  'early_stopping_patience_epochs': 500  # Stop if dev loss doesn't improve for this many epochs
+  'print_results_every_n_epochs': 1
+  'save_model': False
+  'load_previous_model': False
+  'load_model_path': 'Code_to_submit/models_saved/test.pt'
+  'choose_best_model_on': 'dev_loss'
+  'epochs_between_save': 10  # Save if cost improved, and at least this number of epochs have passed
+
+optimizer_params: 
+  'learning_rate': 0.001

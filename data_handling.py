@@ -1,4 +1,5 @@
 from shared_imports import *
+from pathlib import Path
 
 class Scenario():
     '''
@@ -51,6 +52,16 @@ class Scenario():
         self.time_features = time_and_sample_features['time_features']
         self.sample_features = time_and_sample_features['sample_features']
 
+        # Load forecast features if specified in observation_params
+        self.forecast_features = None
+        if 'forecast_features' in observation_params and observation_params['forecast_features'] is not None:
+            forecast_path = observation_params['forecast_features']['file_location']
+            if Path(forecast_path).exists():
+                self.forecast_features = torch.load(forecast_path, map_location='cpu')
+                print(f"Loaded forecast features with shape: {self.forecast_features.shape}")
+            else:
+                print(f"Warning: Forecast features file not found at {forecast_path}")
+
         # Creates a dictionary specifying which data has to be split by sample index and which by period (when dividing into train, dev, test sets)
         self.split_by = self.define_how_to_split_data()
 
@@ -93,6 +104,13 @@ class Scenario():
         
         for k, v in self.sample_features.items():
             data[k] = v
+        
+        # Add forecast features if available
+        if self.forecast_features is not None:
+            # forecast_features shape: [products, periods, stores, features]
+            # We need to convert this to [samples, stores, periods, features] for each sample
+            # Each sample corresponds to one product
+            data['forecast_features'] = self.forecast_features  # [products, periods, stores, features]
         
         return {k: v.float() for k, v in data.items() if v is not None}
     
@@ -147,6 +165,13 @@ class Scenario():
         # Handle product features - sample-based splitting (static features)
         if self.product_features is not None:
             split_by['sample_index'].append('product_features')
+        
+        # Handle forecast features - period-based splitting (time-dependent features)
+        if self.forecast_features is not None:
+            if self.store_params['demand']['distribution'] == 'real':
+                split_by['period'].append('forecast_features')
+            else:
+                split_by['sample_index'].append('forecast_features')
         
         # Add mean and std if they're going to be generated (not None)
         if 'mean' in self.observation_params['include_static_features'] and self.observation_params['include_static_features']['mean']:
@@ -532,7 +557,14 @@ class DatasetCreator():
 
             for k in scenario.split_by['period']:
                 if k in data:  # Only add if key exists
-                    this_data[k] = data[k][:, :, period_range]
+                    if k == 'forecast_features':
+                        # forecast_features shape: [products, periods, stores, features]
+                        # Slice the periods dimension (index 1)
+                        this_data[k] = data[k][:, period_range, :, :]
+                    else:
+                        # Other features shape: [products, stores, periods] or [products, stores, periods, features]
+                        # Slice the periods dimension (index 2)
+                        this_data[k] = data[k][:, :, period_range]
             out_datasets.append(this_data)
         
         return out_datasets

@@ -6,6 +6,7 @@ lgbm_forecasting.ipynb
 lgbm_predictions_splits/
 lgbm_predictions_power/
 lgbm_predictions/
+lgbm_predictions_more_features/
 saved_models/
 vn2_processed_data/
 predictions/

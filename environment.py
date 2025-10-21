@@ -63,6 +63,10 @@ class Simulator(gym.Env):
         if 'product_features' in data:
             self._internal_data['product_features'] = data['product_features']
         
+        # Add forecast features to internal data if available
+        if 'forecast_features' in data:
+            self._internal_data['forecast_features'] = data['forecast_features']
+        
         if observation_params['time_features'] is not None:
             self._internal_data.update({k: data[k] for k in observation_params['time_features']})
         if observation_params['sample_features'] is not None:
@@ -361,6 +365,10 @@ class Simulator(gym.Env):
         if 'product_features' in observation_params and 'product_features' in data:
             observation['product_features'] = data['product_features']
 
+        # Initialize forecast features in the observation
+        if 'forecast_features' in data:
+            observation['forecast_features'] = self.update_forecast_features(data, observation_params, self.batch_size, self.n_stores, current_period=0)
+
         # Initialize time-related features, such as days to christmas
         if observation_params['time_features']:
             self.update_time_features(data, observation, observation_params, current_period=0)
@@ -395,7 +403,7 @@ class Simulator(gym.Env):
         box_values.update({
             'holding_costs': {'low': 0, 'high': np.inf, 'dtype': np.float32},
             'lead_times': {'low': 0, 'high': 2*10, 'dtype': np.int8},
-            'days_to_christmas': {'low': -365, 'high': 365, 'dtype': np.int8},
+            'days_to_christmas': {'low': -365, 'high': 365, 'dtype': np.int16},
             'past_demands': {'low': -np.inf, 'high': np.inf, 'dtype': np.float32},
             'store_inventories': {'low': 0 if problem_params['lost_demand'] else -np.inf, 'high': np.inf, 'dtype': np.float32},
             'warehouse_inventories': {'low': 0, 'high': np.inf, 'dtype': np.float32},
@@ -405,7 +413,7 @@ class Simulator(gym.Env):
             'past_demands': {'low': -np.inf, 'high': np.inf, 'dtype': np.float32},
             'past_demands': {'low': -np.inf, 'high': np.inf, 'dtype': np.float32},
             'warehouse_upper_bound': {'low': 0, 'high': np.inf, 'dtype': np.float32},
-            'current_period': {'low': 0, 'high': periods, 'dtype': np.int8},
+            'current_period': {'low': 0, 'high': periods, 'dtype': np.int16},
         })
 
         return spaces.Dict(
@@ -536,6 +544,26 @@ class Simulator(gym.Env):
         
         return past_time_product_features
     
+    def update_forecast_features(self, data, observation_params, batch_size, stores, current_period):
+        """
+        Update the forecast features in the observation
+        """
+        
+        # forecast_features shape: [products, periods, stores, features]
+        # Extract forecast features for current period for each product in the batch
+        current_period_shifted = current_period + self._internal_data['period_shift']
+        
+        if current_period_shifted < data['forecast_features'].shape[1]:
+            # Get forecast features for all products at current period
+            # Shape: [products, stores, features] -> [batch_size, stores, features]
+            forecast_features = data['forecast_features'][:, current_period_shifted, :, :]  # [products, stores, features]
+        else:
+            # If current period is beyond the forecast data, use the last available period
+            last_period = data['forecast_features'].shape[1] - 1
+            forecast_features = data['forecast_features'][:, last_period, :, :]  # [products, stores, features]
+        
+        return forecast_features
+    
     def update_time_features(self, data, observation, observation_params, current_period):
         """
         Update all data that depends on time in the observation (e.g., days to christmas)
@@ -602,6 +630,16 @@ class Simulator(gym.Env):
                     current_period=min(self.observation['current_period'].item() + 1, self._internal_data[key].shape[2]),  # do this before updating current period!
                     feature_key=key
                 )
+        
+        # Update forecast features
+        if 'forecast_features' in self._internal_data:
+            self.observation['forecast_features'] = self.update_forecast_features(
+                self._internal_data,
+                self.observation_params,
+                self.batch_size,
+                self.n_stores,
+                current_period=min(self.observation['current_period'].item() + 1, self._internal_data['forecast_features'].shape[1])  # do this before updating current period!
+            )
 
     def move_columns_left(self, tensor_to_displace, start_index, end_index):
         """
