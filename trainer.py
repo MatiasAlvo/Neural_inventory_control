@@ -144,7 +144,12 @@ class Trainer():
         """
         Do one epoch of training or testing
         """
-        
+        if not train:
+            discrete_allocation = True
+            if not hasattr(self, 'raised_flag'):
+                self.raised_flag = True
+                print("Warning: Discrete allocation is being enforced")
+
         epoch_loss = 0
         epoch_loss_to_report = 0  # Loss ignoring the first 'ignore_periods' periods
         total_samples = len(data_loader.dataset)

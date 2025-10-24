@@ -14,7 +14,7 @@ optimizer_params:
 
 nn_params: 
   'name': 'data_driven_with_forecasts'
-  'forecasts_raw_path': 'lgbm_predictis'  # Path to the forecasts_raw.pt tensor
+  'forecasts_raw_path': 'lgbm_predidksdsactis'  # Path to the forecasts_raw.pt tensor
   # 'forecasts_raw_path': 'lgbm_predictions/nn_inputs/forecasts_raw.pt'  # Path to the forecasts_raw.pt tensor
   'inner_layer_activations': 
     'master': 'elu'

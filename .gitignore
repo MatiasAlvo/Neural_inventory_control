@@ -1,12 +1,17 @@
 vn2_data_analysis_backup.ipynb
 main_run_backup.ipynb
 lgbm_forecasting.ipynb
+quantile_eval.csv
 
 # dont include lbgm_predictions_splits folder
 lgbm_predictions_splits/
 lgbm_predictions_power/
 lgbm_predictions/
 lgbm_predictions_more_features/
+lgbm_predictions_date_features/
+lgbm_predictions_fixed_target/
+lgbm_predictions_fixed_target_tb_ipcw/
+lgbm_predictions_more_qs/
 saved_models/
 vn2_processed_data/
 predictions/

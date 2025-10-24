@@ -3,15 +3,20 @@
 Train LGBM quantile models for cumulative (protection-time) demand.
 
 This version ADDS engineered features while preserving your data rules:
-- Inclusive lag window up to decision time t
-- Future window (t+1..t+h) must be fully uncensored (avail==1)
+- Exclusive lag window up to decision time t-1 (lags: [t-LB .. t-1])
+- Future window (t .. t+h-1) must be fully uncensored (avail==1)
 - No leakage: only lookback + decision-time calendar used
+
+New anti-tail-bias options:
+  • weeks_to_end feature (distance to series end)
+  • Temporal balancing weights (equalize per-week contribution)
+  • IPCW weights via a censoring model per horizon
 
 Added features (per row):
   • sales×avail elementwise (LB dims)
   • EWMAs (fast/slow), OLS slope (trend), variance/CV, burstiness (p95-p50)/p50
   • zero-sales counts (all vs in-stock), streaks (in-stock / stockout)
-  • availability volatility & switches, tightness flag at t
+  • availability volatility & switches, tightness flag at t-1
   • Fourier seasonal terms (periods 52, 26)
   • Week-of-month (numeric + sin/cos) if 'date' exists; fallback to 4-week cycle
   • Optional: include horizon h as a numeric feature (kept even though we train per-h)
@@ -41,8 +46,8 @@ def row_belongs_to_split(t, h, split, LB):
     start, end = split
     if t < start or t > end:
         return False
-    # require t+h <= end (so target window is fully inside split)
-    if (t + h) > end:
+    # require t+h-1 <= end (so target window is fully inside split)
+    if (t + h - 1) > end:
         return False
     return True
 
@@ -92,6 +97,16 @@ def main():
     # engineering options
     p.add_argument("--include_h_as_feature", type=lambda s: s.lower() in ["1","true","yes","y"], default=True,
                    help="Include horizon h as a numeric feature (still trains per-h models).")
+    p.add_argument("--add_weeks_to_end_feature", type=lambda s: s.lower() in ["1","true","yes","y"], default=True,
+                   help="Append (T_eff-1 - t) as a feature to de-bias the tail.")
+
+    # anti-tail-bias weighting
+    p.add_argument("--temporal_balance_weights", type=lambda s: s.lower() in ["1","true","yes","y"], default=False,
+                   help="Reweight rows inversely by #rows in their decision week t.")
+    p.add_argument("--ipcw_weights", type=lambda s: s.lower() in ["1","true","yes","y"], default=False,
+                   help="Use inverse probability of being uncensored (per-horizon).")
+    p.add_argument("--ipcw_cap", type=float, default=50.0, help="Cap for IPCW weights to avoid extremes.")
+    p.add_argument("--ipcw_min_p", type=float, default=1e-3, help="Floor for censor prob before inversion.")
 
     args = p.parse_args()
 
@@ -171,31 +186,34 @@ def main():
     time_feat_cols = list(time_feats_df.columns)
 
     LB = args.lookback_weeks
-    rows = []
+    rows = []               # uncensored training rows
+    rows_by_h = {h: [] for h in args.horizons}
 
+    # For IPCW: we also need a censoring dataset per horizon (ALL rows, censored or not)
+    censor_X_by_h = {h: [] for h in args.horizons}
+    censor_y_by_h = {h: [] for h in args.horizons}
+    censor_it_by_h = {h: [] for h in args.horizons}  # (i,t) keys
     # Parse explicit splits (inclusive indices), if requested
     train_split = parse_periods(args.train_periods) if args.split_by_period else None
     dev_split   = parse_periods(args.dev_periods)   if args.split_by_period else None
     test_split  = parse_periods(args.test_periods)  if args.split_by_period else None
 
     # -----------------------------
-    # Build supervised rows
+    # Build supervised rows (+ censoring rows)
     # -----------------------------
     for i in range(N):
         s = sales_np[i]
         a = stock_np[i]
 
-        for t in range(LB - 1, T_eff):  # decision time
-            # Inclusive lag window [t-LB+1 : t]
-            past_sales = s[t - LB + 1 : t + 1].astype(np.float32)
-            past_avail = a[t - LB + 1 : t + 1].astype(np.float32)
-
+        for t in range(LB, T_eff):  # decision time
+            # Exclusive lag window [t-LB : t]
+            past_sales = s[t - LB: t].astype(np.float32)
+            past_avail = a[t - LB: t].astype(np.float32)
             if past_sales.shape[0] != LB or past_avail.shape[0] != LB:
                 continue
 
             eps = 1e-6
             roll_mean_all = float(np.mean(past_sales)) if LB > 0 else 0.0
-            # uncensored-only mean
             mask_unc = (past_avail == 1.0)
             if mask_unc.any():
                 roll_mean_unc = float(np.sum(past_sales[mask_unc]) / max(1.0, np.sum(mask_unc)))
@@ -203,7 +221,6 @@ def main():
                 roll_mean_unc = 0.0
             unc_frac = float(np.mean(past_avail)) if LB > 0 else 1.0
 
-            # weeks since last stockout within lookback (LB if none)
             if LB > 0 and np.any(past_avail == 0):
                 last_idx = np.where(past_avail == 0)[0].max()
                 since_last_so = int(LB - 1 - last_idx)
@@ -220,8 +237,7 @@ def main():
                 first = True
                 for xi in x:
                     if first:
-                        v = float(xi)
-                        first = False
+                        v = float(xi); first = False
                     else:
                         v = alpha*float(xi) + (1.0-alpha)*v
                 return float(v)
@@ -254,7 +270,7 @@ def main():
             cv_unc = float(np.sqrt(max(var_unc, 0.0)) / (mean_unc + eps))
             burstiness = float((p95_unc - p50_unc) / (p50_unc + eps))
 
-            # Streaks up to t
+            # Streaks up to t-1
             streak_in = 0
             for v in pa[::-1]:
                 if v == 1.0: streak_in += 1
@@ -268,26 +284,24 @@ def main():
             avail_std = float(pa.std())
             avail_switches = float((pa[1:] != pa[:-1]).sum())
 
-            # Tightness at t: in stock AND last sale near mean_unc (simple heuristic)
+            # Tightness at t-1
             tight_flag = float((pa[-1] == 1.0) and (ps[-1] >= 0.8 * (mean_unc if mask_unc.any() else ps.mean())))
 
-            # Interactions: elementwise sales×avail (LB dims)
+            # Interactions & transforms
             sales_x_avail = (ps * pa).astype(np.float32)
+            log1p_sales   = np.log1p(ps).astype(np.float32)
 
-            # Optional transforms: log1p of sales lags (helps heavy tails)
-            log1p_sales = np.log1p(ps).astype(np.float32)
-
-            # Fourier seasonality using t index (periods 52 & 26)
+            # Fourier by t index (decision time only)
             week_idx = float(t % 52)
             s1 = np.sin(2*np.pi*week_idx/52.0); c1 = np.cos(2*np.pi*week_idx/52.0)
             s2 = np.sin(2*np.pi*week_idx/26.0); c2 = np.cos(2*np.pi*week_idx/26.0)
 
-            # Week-of-month (numeric + cyclical), aligned at t
-            wom_num  = float(wom_idx[t])         # 1..5 (or 1..4 fallback)
+            # Week-of-month encodings at t
+            wom_num  = float(wom_idx[t])
             wom_sin_t = float(wom_sin[t])
             wom_cos_t = float(wom_cos[t])
 
-            # ---------- Decision-time features ----------
+            # Decision-time features
             time_vec = time_feats_df.iloc[t].values.astype(np.float32)
             static_vec = static_cats_enc.iloc[i].values.astype(np.float32)
             if tp is not None:
@@ -295,7 +309,6 @@ def main():
             else:
                 tp_vec = np.array([], dtype=np.float32)
 
-            # Pack engineered scalars
             engineered = np.array([
                 ewma_fast, ewma_slow, slope,
                 var_all, mean_unc, var_unc, cv_unc, burstiness,
@@ -308,21 +321,37 @@ def main():
 
             # Base vector (order matters; we’ll mirror in feat_names)
             base_prefix = [
-                past_sales,                # LB
-                past_avail,                # LB
-                sales_x_avail,             # LB
-                log1p_sales,               # LB
+                ps,                         # LB
+                pa,                         # LB
+                sales_x_avail,              # LB
+                log1p_sales,                # LB
                 np.array([roll_mean_all, roll_mean_unc, unc_frac, since_last_so], dtype=np.float32),
                 engineered,
                 time_vec, static_vec, tp_vec
             ]
 
+            # NEW: weeks_to_end feature
+            if args.add_weeks_to_end_feature:
+                weeks_to_end = np.array([float(T_eff - 1 - t)], dtype=np.float32)
+
             for h in args.horizons:
-                # Require full availability in target window (uncensored future)
-                future_avail = a[t + 1 : t + 1 + h]
-                if future_avail.shape[0] < h:
-                    continue
-                if not np.all(future_avail == 1.0):
+                # For censoring model (uses same features, plus optional h, plus weeks_to_end if enabled)
+                censor_x_parts = list(base_prefix)
+                if args.add_weeks_to_end_feature:
+                    censor_x_parts.append(weeks_to_end)
+                if args.include_h_as_feature:
+                    censor_x_parts.append(np.array([float(h)], dtype=np.float32))
+                censor_X = np.concatenate(censor_x_parts)
+
+                # Determine uncensored indicator for this horizon (t .. t+h-1)
+                future_avail = a[t: t + h]
+                is_unc = (future_avail.shape[0] == h) and np.all(future_avail == 1.0)
+                censor_X_by_h[h].append(censor_X)
+                censor_y_by_h[h].append(1.0 if is_unc else 0.0)
+                censor_it_by_h[h].append((i, t))
+
+                # Only build label row when uncensored
+                if not is_unc:
                     continue
 
                 # split tagging
@@ -337,31 +366,30 @@ def main():
                     else:
                         continue
 
-                # cumulative future demand for t+1..t+h
-                y = float(np.sum(s[t + 1 : t + 1 + h]))
+                # cumulative future demand for t .. t+h-1
+                y = float(np.sum(s[t : t + h]))
 
-                # Optionally include horizon as a feature
+                # Final X row
+                x_parts = list(base_prefix)
+                if args.add_weeks_to_end_feature:
+                    x_parts.append(weeks_to_end)
                 if args.include_h_as_feature:
-                    Xrow = np.concatenate(base_prefix + [np.array([float(h)], dtype=np.float32)])
-                else:
-                    Xrow = np.concatenate(base_prefix)
+                    x_parts.append(np.array([float(h)], dtype=np.float32))
+                Xrow = np.concatenate(x_parts)
 
-                rows.append((i, t, h, Xrow, y, split_tag))
+                rec = (i, t, h, Xrow, y, split_tag)
+                rows.append(rec)
+                rows_by_h[h].append(rec)
 
     if len(rows) == 0:
         raise RuntimeError("No training rows constructed. Check availability flags, alignment, and split windows.")
-
-    # Build per-horizon matrices
-    rows_by_h = {h: [] for h in args.horizons}
-    for rec in rows:
-        rows_by_h[rec[2]].append(rec)
 
     models_info = []
     coverage_report = []
     split_counts = {h: {"train": 0, "dev": 0, "test": 0} for h in args.horizons}
 
     # ---------- Feature names schema (mirror the construction order) ----------
-    def build_feat_names(LB, time_feat_cols, static_cats_enc, tp, include_h):
+    def build_feat_names(LB, time_feat_cols, static_cats_enc, tp, include_h, add_w2e):
         names = []
         names += [f"sales_lag_{k}" for k in range(LB, 0, -1)]
         names += [f"avail_lag_{k}" for k in range(LB, 0, -1)]
@@ -381,21 +409,66 @@ def main():
         names += [f"static_{c}" for c in static_cats_enc.columns]
         if tp is not None:
             names += [f"tp_{k}" for k in range(tp.shape[0])]
+        if add_w2e:
+            names += ["weeks_to_end"]
         if include_h:
             names += ["horizon"]
         return names
 
-    base_feat_names = build_feat_names(LB, time_feat_cols, static_cats_enc, tp, args.include_h_as_feature)
+    base_feat_names = build_feat_names(LB, time_feat_cols, static_cats_enc, tp,
+                                       args.include_h_as_feature, args.add_weeks_to_end_feature)
 
+    # ------------- Optional IPCW: fit censoring models per horizon -------------
+    # We will get p_hat[(i,t,h)] = P(uncensored | X), then weight quantile rows by 1/p_hat (capped)
+    p_hat_by_h = {}
+    if args.ipcw_weights:
+        if not HAS_LGBM:
+            raise RuntimeError(f"lightgbm not available for IPCW: {LGBM_IMPORT_ERROR}")
+        print("[IPCW] Fitting censoring models per horizon...")
+        for h in args.horizons:
+            Xc = np.stack(censor_X_by_h[h], axis=0).astype(np.float32)
+            yc = np.array(censor_y_by_h[h], dtype=np.float32)
+            it_keys = censor_it_by_h[h]
+
+            # simple LGBM classifier
+            c_params = {
+                "objective": "binary",
+                "learning_rate": 0.05,
+                "num_leaves": 63,
+                "min_data_in_leaf": 25,
+                "feature_fraction": 0.85,
+                "bagging_fraction": 0.8,
+                "bagging_freq": 1,
+                "metric": "auc",
+                "verbosity": -1,
+                "force_col_wise": True,
+                "num_threads": args.num_threads,
+                "seed": args.random_state,
+            }
+            # No strict split here; we just need probabilities
+            dtrain = lgb.Dataset(Xc, label=yc, feature_name=base_feat_names, free_raw_data=False)
+            c_booster = lgb.train(c_params, dtrain, num_boost_round=400)
+
+            p_all = c_booster.predict(Xc)  # probabilities
+            # map to dict for quick lookup
+            p_map = {}
+            for k, p_val in zip(it_keys, p_all):
+                # k = (i,t)
+                p_map[k] = float(p_val)
+            p_hat_by_h[h] = p_map
+        print("[IPCW] Done.")
+
+    # ---------------- Train quantile models per horizon ----------------
     for h in args.horizons:
         recs = rows_by_h[h]
         if len(recs) == 0:
             continue
 
-        X = np.stack([r[3] for r in recs], axis=0)
+        X = np.stack([r[3] for r in recs], axis=0).astype(np.float32)
         y = np.array([r[4] for r in recs], dtype=np.float32)
         t_idx = np.array([r[1] for r in recs], dtype=np.int32)
         tags = np.array([r[5] for r in recs], dtype=object)
+        i_idx = np.array([r[0] for r in recs], dtype=np.int32)
 
         # Split masks
         if args.split_by_period:
@@ -420,13 +493,38 @@ def main():
 
         X_train, y_train = X[train_mask], y[train_mask]
         X_val,   y_val   = X[val_mask],   y[val_mask]
+        t_train          = t_idx[train_mask]
+        i_train          = i_idx[train_mask]
+
+        # Build training weights
+        train_w = np.ones_like(y_train, dtype=np.float32)
+
+        # Temporal balancing (equalize per-week contribution)
+        if args.temporal_balance_weights:
+            counts_by_t = np.bincount(t_train, minlength=int(T_eff))
+            counts_by_t[counts_by_t == 0] = 1
+            w_time = 1.0 / counts_by_t[t_train]
+            w_time *= (len(w_time) / w_time.sum())  # normalize to mean 1
+            train_w *= w_time.astype(np.float32)
+
+        # IPCW (1 / P(uncensored | X)) per horizon
+        if args.ipcw_weights:
+            p_map = p_hat_by_h[h]
+            p_list = []
+            for ii, tt in zip(i_train, t_train):
+                p = p_map.get((int(ii), int(tt)), 1.0)
+                p_list.append(p)
+            p_arr = np.clip(np.array(p_list, dtype=np.float32), args.ipcw_min_p, 1.0)
+            w_ipcw = 1.0 / p_arr
+            w_ipcw = np.clip(w_ipcw, 1.0, args.ipcw_cap)
+            train_w *= w_ipcw
 
         # Feature names (same for all horizons)
         feat_names = list(base_feat_names)
 
         if HAS_LGBM:
             import lightgbm as lgb
-            lgb_train = lgb.Dataset(X_train, label=y_train, feature_name=feat_names, free_raw_data=False)
+            lgb_train = lgb.Dataset(X_train, label=y_train, weight=train_w, feature_name=feat_names, free_raw_data=False)
             lgb_val   = lgb.Dataset(X_val, label=y_val, reference=lgb_train, free_raw_data=False)
         else:
             raise RuntimeError(f"lightgbm not available: {LGBM_IMPORT_ERROR}")
@@ -488,7 +586,14 @@ def main():
             "DEV_PERIODS": args.dev_periods,
             "TEST_PERIODS": args.test_periods,
             "INCLUDE_H_AS_FEATURE": args.include_h_as_feature,
-            "HAS_TRUE_WOM": bool("date" in date_df.columns)
+            "HAS_TRUE_WOM": bool("date" in date_df.columns),
+            "TARGET_STARTS_AT_T": True,
+            "LAG_WINDOW_INCLUSIVE_T": False,
+            "ADD_WEEKS_TO_END_FEATURE": bool(args.add_weeks_to_end_feature),
+            "TEMPORAL_BALANCE_WEIGHTS": bool(args.temporal_balance_weights),
+            "IPCW_WEIGHTS": bool(args.ipcw_weights),
+            "IPCW_CAP": float(args.ipcw_cap),
+            "IPCW_MIN_P": float(args.ipcw_min_p),
         },
         "N_items": int(N),
         "T_eff": int(T_eff),

@@ -54,10 +54,10 @@ observation_params:
     'lead_times': True 
     'upper_bounds': False
   'demand': 
-    'past_periods': 1 # number of periods to look back for demand! ie how many periods are given to the neural network policy as input
+    'past_periods': 16 # number of periods to look back for demand! ie how many periods are given to the neural network policy as input
     'period_shift': 0 # start x periods after the first period in the dataset
   'instock': # set past_periods to 0 if you don't want to use!
-    'past_periods': 0 # number of periods to look back for instock! ie how many periods are given to the neural network policy as input
+    'past_periods': 16 # number of periods to look back for instock! ie how many periods are given to the neural network policy as input
     'period_shift': 0 # start x periods after the first period in the dataset 
   # 'time_product_features_tensor':  # comment out if you don't want to use time product features!
   #   'past_periods': 16 # Use same number of periods as demand and instock
@@ -80,12 +80,12 @@ store_params:
     'expand': False
     'clip': False
     'decimals': 3
-  # 'instock': # set past_periods to 0 if you don't want to use! but dont comment out
-  #   'file_location': 'vn2_processed_data/data_with_lgbm/stock.pt'
-  #   'sample_across_stores': False
-  #   'expand': False
-  #   'clip': False
-  #   'decimals': 3
+  'instock': # set past_periods to 0 if you don't want to use! but dont comment out
+    'file_location': 'vn2_processed_data/data_with_lgbm/stock.pt'
+    'sample_across_stores': False
+    'expand': False
+    'clip': False
+    'decimals': 3
   # 'time_product_features_tensor':  # comment out if you don't want to use time product features!
   #   'file_location': 'vn2_processed_data/data_with_lgbm/time_product_features.pt'
   #   'sample_across_stores': False
