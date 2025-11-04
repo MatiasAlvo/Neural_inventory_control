@@ -15,3 +15,21 @@ lgbm_predictions_more_qs/
 saved_models/
 vn2_processed_data/
 predictions/
+Figure 5.png
+Phase 0 - Price.csv
+Phase 0 - Sales.csv
+Phase 1 - Price.csv
+Phase 1 - Sales.csv
+Phase 2 - Sales.csv
+lgbm/
+lgbm_vn1_models/
+make_nn_inputs copy 2.py
+timegpt_nn_inputs.py
+train_lgbm_pipeline copy 2.py
+vn1_data_dir/
+vn1_data_phase0_train/
+vn1_make_submission_from_lgbm.py
+vn1_prepare_data.py
+vn2_data/Order_2/
+vn2_data/Order_3/
+vn2_data/Order_4/

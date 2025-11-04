@@ -135,12 +135,14 @@ class Trainer():
                 observation_params, 
                 train=False, 
                 ignore_periods=params_by_dataset['test']['ignore_periods'],
-                discrete_allocation=discrete_allocation
+                discrete_allocation=discrete_allocation,
+                print_loss=True
                 )
         
         return average_test_loss, average_test_loss_to_report
 
-    def do_one_epoch(self, optimizer, data_loader, loss_function, simulator, model, periods, problem_params, observation_params, train=True, ignore_periods=0, discrete_allocation=False):
+    def do_one_epoch(self, optimizer, data_loader, loss_function, simulator, model, periods, problem_params, observation_params, 
+    train=True, ignore_periods=0, discrete_allocation=False, print_loss=False):
         """
         Do one epoch of training or testing
         """
@@ -166,13 +168,13 @@ class Trainer():
 
                 # Forward pass
                 total_reward, reward_to_report = self.simulate_batch(
-                    loss_function, simulator, model, periods, problem_params, data_batch, observation_params, ignore_periods, discrete_allocation
+                    loss_function, simulator, model, periods, problem_params, data_batch, observation_params, ignore_periods, discrete_allocation, print_loss=print_loss
                     )
                 epoch_loss += total_reward.item()  # Rewards from period 0
                 epoch_loss_to_report += reward_to_report.item()  # Rewards from period ignore_periods onwards
                 
                 mean_loss = total_reward/(len(data_batch['demands'])*periods*problem_params['n_stores'])
-                
+
                 # Backward pass (to calculate gradient) and take gradient step
                 if train and model.trainable:
                     mean_loss.backward()
@@ -183,7 +185,8 @@ class Trainer():
         
         return epoch_loss/(total_samples*periods*problem_params['n_stores']), epoch_loss_to_report/(total_samples*periods_tracking_loss*problem_params['n_stores'])
     
-    def simulate_batch(self, loss_function, simulator, model, periods, problem_params, data_batch, observation_params, ignore_periods=0, discrete_allocation=False):
+    def simulate_batch(self, loss_function, simulator, model, periods, problem_params, data_batch, observation_params, 
+    ignore_periods=0, discrete_allocation=False, print_loss=False):
         """
         Simulate for an entire batch of data, across the specified number of periods
         """
@@ -207,6 +210,11 @@ class Trainer():
                 action = {key: val.round() for key, val in action.items()}
 
             observation, reward, terminated, _, _  = simulator.step(action)
+
+            if print_loss:
+                # print the demand of the first sample in the batch
+                print(f'Demand: {data_batch["demands"][0:3, 0, t]}')
+                print(f'Period {t}, reward: {reward.sum()}')
 
             total_reward = loss_function(None, action, reward)
 
