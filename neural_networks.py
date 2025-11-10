@@ -211,45 +211,52 @@ class DataDrivenNet(MyNeuralNetwork):
         """
         # Build input features list
         input_features = [observation['store_inventories']]
+
+        print(f"length of input_features: {len(observation['store_inventories'][0, 0])}")
         
         # Add demand-related features (data driven is always real data)
         input_features.extend([
             observation['past_demands'],
         ])
+        print(f"length of input_features: {len(observation['past_demands'][0, 0])}")
         
-        # Add instock features if available
-        if 'past_instocks' in observation:
-            input_features.append(observation['past_instocks'])
+        # # Add instock features if available
+        # if 'past_instocks' in observation:
+        #     input_features.append(observation['past_instocks'])
         
-        # Add time product features if available
-        time_product_feature_keys = [k for k in observation.keys() if k.startswith('past_time_product_feature_')]
-        for key in sorted(time_product_feature_keys):  # Sort to ensure consistent ordering
-            input_features.append(observation[key])
+        # # Add time product features if available
+        # time_product_feature_keys = [k for k in observation.keys() if k.startswith('past_time_product_feature_')]
+        # for key in sorted(time_product_feature_keys):  # Sort to ensure consistent ordering
+        #     input_features.append(observation[key])
         
         # Add all time features specified in observation_params
         if hasattr(self, 'scenario') and self.scenario and 'observation_params' in self.scenario.__dict__:
             time_features_list = self.scenario.observation_params.get('time_features', [])
             for feature_name in time_features_list:
+                print(f"Feature name: {feature_name}")
                 if feature_name in observation:
+                    print(f'found')
                     input_features.append(observation[feature_name])
         
-        # Add product features if available - need to expand to match other features
-        if 'product_features' in observation:
-            # Product features have shape [samples, features], need to expand to [samples, stores, features]
-            # product_features = observation['product_features']  # [samples, features]
-            product_features = observation['product_features'].clone()
-            # n_stores = observation['store_inventories'].size(1)
-            # Expand to [samples, stores, features] to match other features
-            # Use repeat() to create a proper copy that maintains gradient flow
-            # product_features_expanded = product_features.unsqueeze(1).repeat(1, n_stores, 1)
-            product_features_expanded = product_features
-            # product_features_expanded = product_features.detach().unsqueeze(1).expand(-1, n_stores, -1).contiguous()
+        # # Add product features if available - need to expand to match other features
+        # if 'product_features' in observation:
+        #     # Product features have shape [samples, features], need to expand to [samples, stores, features]
+        #     # product_features = observation['product_features']  # [samples, features]
+        #     product_features = observation['product_features'].clone()
+        #     # n_stores = observation['store_inventories'].size(1)
+        #     # Expand to [samples, stores, features] to match other features
+        #     # Use repeat() to create a proper copy that maintains gradient flow
+        #     # product_features_expanded = product_features.unsqueeze(1).repeat(1, n_stores, 1)
+        #     product_features_expanded = product_features
+        #     # product_features_expanded = product_features.detach().unsqueeze(1).expand(-1, n_stores, -1).contiguous()
 
 
-            input_features.append(product_features_expanded)
+        #     input_features.append(product_features_expanded)
         
         # Flatten and concatenate all features
         input_tensor = self.flatten_then_concatenate_tensors(input_features)
+        print(f"input_tensor shape: {input_tensor.shape}")
+        print()
         # print("Checking gradients:")
         # for i, feat in enumerate(input_features):
         #     print(f"Feature {i}: requires_grad={feat.requires_grad}")
@@ -315,6 +322,7 @@ class DataDrivenNetWithForecasts(MyNeuralNetwork):
         
         # Single warehouse or no warehouse
         return {'stores': self.net['master'](input_tensor).unsqueeze(2)}
+        # return {'stores': self.net['master'](input_tensor).unsqueeze(2) + 0.5}
 
 class MeanLastXBaseline(MyNeuralNetwork):
     """

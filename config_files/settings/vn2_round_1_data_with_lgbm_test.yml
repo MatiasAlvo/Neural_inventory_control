@@ -18,9 +18,9 @@ test_seeds :  # Seeds for test set
 
 sample_data_params: # define the periods to consider for train, dev and test sets
   'split_by_period': True
-  'train_periods': (0, 151)
-  'dev_periods': (152, 160)
-  'test_periods': (152, 160)
+  'train_periods': (0, 153)
+  'dev_periods': (154, 162)
+  'test_periods': (154, 162)
   # 'test_periods': (151, 160)
 
 problem_params : 
@@ -34,7 +34,7 @@ params_by_dataset :
   'train': 
     'n_samples': 599 # set equal to the number of rows in sales data!
     'batch_size': 100 
-    'periods': 151 # set equal to the number of periods in "train_periods" - (period_shift + 1)
+    'periods': 153 # set equal to the number of periods in "train_periods" - (period_shift + 1)
     'ignore_periods': 2 # number of periods to ignore for reporting!
   'dev': 
     'n_samples': 599 # set equal to the number of rows in sales data!
@@ -73,7 +73,7 @@ observation_params:
   'forecast_features': # Add forecast features from LGBM predictions
     # 'file_location': 'lgbm/predictions_fixed_target_tb_ipcw/nn_inputs/forecasts_raw.pt'
     # 'file_location': 'lgbm/order_2/less_qs/nn_inputs/forecasts_raw.pt'
-    'file_location': 'lgbm/order_4/new/nn_inputs/forecasts_raw.pt'
+    'file_location': 'lgbm/order_6/new/nn_inputs/forecasts_raw.pt'
     # 'file_location': 'lgbm/order_3/validating/nn_inputs/forecasts_raw.pt'
     # 'file_location': 'lgbm/order_2/h4/nn_inputs/forecasts_raw.pt'
     # 'file_location': 'lgbm/order_2/more_weeks/nn_inputs/forecasts_raw.pt'

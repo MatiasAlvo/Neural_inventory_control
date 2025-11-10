@@ -24,8 +24,12 @@ Phase 2 - Sales.csv
 lgbm/
 lgbm_vn1_models/
 make_nn_inputs copy 2.py
+make_nn_inputs.py
 timegpt_nn_inputs.py
+train_with_forecasts.py
 train_lgbm_pipeline copy 2.py
+train_lgbm_pipeline copy.py
+train_lgbm_pipeline.py
 vn1_data_dir/
 vn1_data_phase0_train/
 vn1_make_submission_from_lgbm.py
@@ -33,3 +37,6 @@ vn1_prepare_data.py
 vn2_data/Order_2/
 vn2_data/Order_3/
 vn2_data/Order_4/
+vn2_data/Order_5/
+# vn2_data/Order_6/
+main_run_for_paper.ipynb
