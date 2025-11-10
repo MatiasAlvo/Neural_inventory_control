@@ -1,0 +1,14 @@
+{
+  "columns": [
+    "Store",
+    "Product",
+    "ProductGroup",
+    "Division",
+    "Department",
+    "DepartmentGroup",
+    "StoreFormat",
+    "Format"
+  ],
+  "categories": [
+    [
+      
